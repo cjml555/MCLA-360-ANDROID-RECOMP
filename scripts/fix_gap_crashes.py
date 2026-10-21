@@ -37,9 +37,33 @@ def run(cmd, cwd=None, timeout=600, check=False):
                           capture_output=True, text=True, check=check)
 
 
+def limpiar_shm():
+    """Libera la arena de memoria del guest (/dev/shm/xenia_memory_*).
+
+    La arena del invitado se respaldan en tmpfs (5.8 GB aqui). Cada ejecucion
+    deja un archivo de 4.8 GB, y varios ciclos seguidos agotan el espacio: el
+    mmap del guest devuelve SIGBUS en lugar de ENOMEM, y el crash aparece como
+    "Bus error" en libc, sin relacion con el codigo del juego. Limpiarlo entre
+    rondas evita ese falso positivo.
+    """
+    for path in Path("/dev/shm").glob("xenia_memory_*"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def regenerar_huecos():
+    """Relanza scripts/huecos.py sobre el codigo generado actual."""
+    r = run(["python3", "scripts/huecos.py", "--gen", "generated/default",
+             "--salida", "out/huecos.txt", "--toml", "out/huecos_functions.toml"],
+            cwd=ROOT, timeout=600)
+    return r.returncode == 0 and (ROOT / "out/huecos.txt").exists()
+
+
 def gaps():
     """Devuelve {start: size} de los huecos >= 8 bytes leidos del informe."""
-    report = Path("/tmp/huecos_mcla.txt")
+    report = ROOT / "out/huecos.txt"
     if not report.exists():
         return {}
     out = {}
@@ -120,6 +144,7 @@ def main():
 
     for ronda in range(1, args.max_rondas + 1):
         print(f"\n=== ronda {ronda} ===", flush=True)
+        limpiar_shm()
         rebuild()
         log, addr = launch()
         if addr is None:
@@ -129,6 +154,11 @@ def main():
             print("  sin crash de funcion no registrada", flush=True)
             return
         print(f"  crash en 0x{addr:08X}", flush=True)
+        # El informe de huecos se midio sobre el codigo anterior: tras
+        # regenerar, los limites cambian. Releyerlo antes de buscar.
+        if not regenerar_huecos():
+            print("  no se pudo regenerar el informe de huecos", flush=True)
+            return
         gs = gaps()
         gap = next((s for s, size in gs.items() if s <= addr < s + size), None)
         if gap is None:
