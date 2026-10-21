@@ -83,17 +83,39 @@ def rebuild():
     print("  * compilado", flush=True)
 
 
-def regenerate():
-    print("  * regenerando codegen (~70s)...", flush=True)
-    r = run(["./out/pc/rexglue", "codegen", "mcla_manifest.toml"], cwd=ROOT, timeout=900)
-    if r.returncode != 0:
-        print(r.stdout[-4000:])
-        print(r.stderr[-2000:])
-        raise SystemExit("fallo el codegen")
-    m = re.search(r"Codegen summary: (\d+) written, (\d+) unchanged", r.stdout)
-    print(f"  * codegen: {m.group(0) if m else 'ok'}", flush=True)
-    if "Validation failed" in r.stdout or "unresolved calls" in r.stdout:
-        raise SystemExit("validacion fallida: " + r.stdout[-1500:])
+ORPHAN_RE = re.compile(r"^\s+(0x[0-9A-Fa-f]{8}) from (0x[0-9A-Fa-f]{8}):", re.M)
+
+
+def regenerate(max_intentos=8):
+    """Regenera el codegen resolviendo las ramas huerfanas que reporto el
+    validador.
+
+    El analizador solo valida ramas DIRECTAS. Una rama a un destino que
+    ninguna funcion posee sale como "UnresolvedCall": declararlo en el
+    analysis TOML deja que el descubrimiento le encuentre limites. Es
+    iterativo: declarar una direccion cambia los limites de sus vecinas y
+    aparece otro destino, normalmente a pocos bytes.
+    """
+    for intento in range(1, max_intentos + 1):
+        print(f"  * regenerando codegen (~70s), intento {intento}...", flush=True)
+        r = run(["./out/pc/rexglue", "codegen", "mcla_manifest.toml"], cwd=ROOT, timeout=900)
+        salida = r.stdout + r.stderr
+        if r.returncode == 0 and "Validation failed" not in salida:
+            m = re.search(r"Codegen summary: (\d+) written, (\d+) unchanged", r.stdout)
+            print(f"  * codegen: {m.group(0) if m else 'ok'}", flush=True)
+            return True
+        destinos = sorted({int(d, 16) for d, _ in ORPHAN_RE.findall(salida)})
+        if not destinos:
+            print(salida[-2500:], flush=True)
+            raise SystemExit("fallo el codegen por otra causa")
+        print(f"  * validacion fallo con {len(destinos)} destino(s) sin dueno: "
+              + ", ".join(f"0x{d:08X}" for d in destinos), flush=True)
+        nuevas = declare(destinos)
+        if not nuevas:
+            print("  * sin progreso en las ramas huerfanas: parando", flush=True)
+            return False
+    print("  * se agotaron los intentos del codegen", flush=True)
+    return False
 
 
 def launch():
@@ -142,6 +164,14 @@ def main():
                     help="solo análisis, no regenerar")
     args = ap.parse_args()
 
+    # El target `mcla` depende del codegen, asi que el build dispara el
+    # codegen. Si la validacion falla (ramas huerfanas), el build falla
+    # tambien: hay que resolverlo ANTES de compilar, no despues.
+    if not args.no_codegen:
+        if not regenerate():
+            print("  el codegen no pudo converger: parando", flush=True)
+            return
+
     for ronda in range(1, args.max_rondas + 1):
         print(f"\n=== ronda {ronda} ===", flush=True)
         limpiar_shm()
@@ -177,7 +207,9 @@ def main():
             print("  sin progreso: parando", flush=True)
             return
         if not args.no_codegen:
-            regenerate()
+            if not regenerate():
+                print("  el codegen no pudo converger: parando", flush=True)
+                return
 
 
 if __name__ == "__main__":
