@@ -1,0 +1,91 @@
+# Initial analysis found direct branches to these executable addresses without
+# function ownership. Declare the destinations and let discovery find bounds.
+# Keep registers in the shared PPC context for this initial bring-up.
+cr_as_local = false
+xer_as_local = false
+ctr_as_local = false
+non_volatile_as_local = false
+
+[functions]
+# b 0x823F32E8 at 0x823FB7F4.
+"0x823F32E8" = { }
+# b 0x8220BF08 at 0x8220DAF4.
+"0x8220BF08" = { }
+# b 0x824B0DE8 at 0x824AF4D0.
+"0x824B0DE8" = { }
+# b 0x822B88C8 at 0x82203F90.
+"0x822B88C8" = { }
+# b 0x822C98B8 at 0x822C9E04.
+"0x822C98B8" = { }
+# b 0x8220C018 at 0x8220DA7C.
+"0x8220C018" = { }
+# b 0x823FD718 at 0x823FDB24.
+"0x823FD718" = { }
+
+# Added by auto_analysis.py: branch targets the validator reported
+# as having no function ownership.
+# b 0X822C9948 at 0x822C9E14.
+"0X822C9948" = { }
+
+# --- Code gaps without a function owner (tools/huecos.py) ---
+#
+# The runtime crash "[FATAL] Call to invalid or unregistered function at
+# guest address 0x827A7FD0" is an INDIRECT call (through a pointer or a
+# vtable), so the Validate phase never sees it: it only checks direct
+# branches. The address is the start of a 32-byte gap that automatic
+# discovery left unowned, right after sub_827A7FB0.
+#
+# Declaring the start of the gap lets the Discover phase claim it and
+# register the entry the game actually calls.
+"0x827A7FD0" = { }
+
+# --- Auto: gaps sin dueno (huecos.py) ---
+"0x827A8220" = { }
+"0x827A8228" = { }
+"0x827A8230" = { }
+"0x827A8238" = { }
+"0x827AD168" = { }
+"0x827AD170" = { }
+"0x827AFC78" = { }
+"0x827AFC80" = { }
+"0x827B0538" = { }
+"0x827B0540" = { }
+"0x827B0548" = { }
+"0x827B0550" = { }
+"0x827B0558" = { }
+"0x827B0560" = { }
+"0x827B0568" = { }
+"0x827B0570" = { }
+"0x827B0578" = { }
+"0x827B0580" = { }
+"0x827B0588" = { }
+"0x827B0590" = { }
+"0x827B0598" = { }
+"0x827B05A0" = { }
+"0x827B05A8" = { }
+"0x827B05B0" = { }
+"0x827B1048" = { }
+"0x827B1050" = { }
+"0x827B1058" = { }
+"0x827B1060" = { }
+"0x827B1068" = { }
+"0x827B1070" = { }
+"0x827B1078" = { }
+"0x827B1080" = { }
+"0x827B4B58" = { }
+"0x827B4B60" = { }
+"0x827B4B68" = { }
+"0x827B4B70" = { }
+"0x827B4B78" = { }
+"0x827B4B80" = { }
+"0x827B4B88" = { }
+"0x827B4B90" = { }
+"0x8249CBF0" = { }
+"0x8249CBF8" = { }
+"0x8249CC00" = { }
+"0x8249CC08" = { }
+"0x8249CC10" = { }
+"0x8249CC18" = { }
+"0x823F3C68" = { }
+"0x823F3C70" = { }
+"0x823F3C78" = { }
