@@ -80,6 +80,11 @@ public final class GameActivity extends SDLActivity {
             Log.w(TAG, "REX_APP_FOLDER", e);
         }
 
+        // The settings ship in the APK's assets; the native side reads them
+        // from the user folder, so copy them out the first time. An existing
+        // file wins: the user may have changed it.
+        copyAssetIfAbsent("mcla.toml", new File(userRoot, "mcla.toml"));
+
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         super.onCreate(state);
 
@@ -108,6 +113,20 @@ public final class GameActivity extends SDLActivity {
     private int dp(int value) {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value,
                 getResources().getDisplayMetrics()));
+    }
+
+    /** Copies an asset to a file the first time, if the file is not there yet. */
+    private void copyAssetIfAbsent(String assetName, File target) {
+        if (target.isFile()) return;
+        try (java.io.InputStream in = getAssets().open(assetName)) {
+            java.io.FileOutputStream out = new java.io.FileOutputStream(target);
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+            out.close();
+        } catch (Exception e) {
+            Log.w(TAG, "copyAsset " + assetName, e);
+        }
     }
 
     @Override

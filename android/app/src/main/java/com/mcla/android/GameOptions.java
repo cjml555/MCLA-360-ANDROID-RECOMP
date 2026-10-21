@@ -117,10 +117,9 @@ final class GameOptions {
         if ("true".equals(get(context, DEBUG_OVERLAY.key))) {
             args.add("--debug_overlay=true");
         }
-        // The per-frame CSV: the native side logs it when this is set.
-        if ("true".equals(get(context, FRAME_LOG.key))) {
-            args.add("--perf_log_csv=");
-        }
+        // The per-frame CSV is set by the native side (nativeStartFrameLog), not
+        // here: the cvar wants a file path, and the launcher knows where the
+        // logs live.
         return args;
     }
 }

@@ -97,7 +97,7 @@ Java_com_mcla_android_GameActivity_nativeFramesPresented(JNIEnv*, jclass) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_mcla_android_GameActivity_nativeStartFrameLog(JNIEnv*, jclass, jstring path) {
+Java_com_mcla_android_GameActivity_nativeStartFrameLog(JNIEnv* env, jclass, jstring path) {
   if (!path) return;
   const char* utf = env->GetStringUTFChars(path, nullptr);
   if (!utf) return;
