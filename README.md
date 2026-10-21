@@ -14,8 +14,14 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 > - **Android:** el juego **corre en el móvil** (Motorola Edge 50 Fusion,
 >   Android 16). Llega a la pantalla de título: 292 pipelines gráficos, 0
 >   errores fatales, 99.9% de fotogramas sin espera, audio sin silencios y el
->   HUD de FPS encima. APK de release (`com.mcla.android` 0.1.0, arm64-v8a,
->   21.7 MB) con `scripts/port_android.sh`.
+>   HUD de FPS encima (2-12 FPS según la escena). APK de release
+>   (`com.mcla.android` 0.1.0, arm64-v8a, 21.7 MB) con
+>   `scripts/port_android.sh`.
+>
+> **Lo que falta:** el "PRESS ▶" de la pantalla de título no avanza. El SDK
+> registra un gamepad táctil (`Android touch gamepad is ready`), pero falta la
+> vista Java que dibuje los botones en pantalla, así que no hay forma de
+> mandar una pulsación al juego.
 >
 > Última dirección resuelta: `0x82554080`. Quedan declaradas 68 entradas a
 > mano en `mcla_analysis.toml`.
