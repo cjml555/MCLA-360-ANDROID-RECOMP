@@ -1,0 +1,27 @@
+# MCLA 360: configuracion del port para Android.
+#
+# El juego se lee de su propia carpeta: Android/data/com.mcla.android/files/mcla.toml
+# (este asset es la copia inicial; el launcher la escribe en el user data root).
+#
+# gpu_plugin: la emulacion de la GPU Xenos vive en un plugin del SDK. Sin esto
+# el kernel registra "no GPU emulation loaded" y el juego no llega al menu.
+gpu_plugin = "xenos"
+
+# El juego dibuja a 1280x720 (EDRAM emulada). El presentador hace el escalado.
+present_letterbox = false
+
+# Shaders: la primera ejecucion los compila en el movil, unos segundos.
+async_shader_compilation = true
+vulkan_pipeline_creation_threads = 2
+vulkan_async_skip_incomplete_frames = true
+
+# La GPU movil (Adreno/Mali) no tiene geometry shader ni poligonos sin
+# relleno: el renderizador los emula.
+vulkan_require_geometry_shader = false
+vulkan_require_fill_mode_non_solid = false
+vulkan_native_shader_features = false
+
+render_target_path_vulkan = "fbo"
+
+# 1 = ingles (el juego trae las voces en ingles).
+user_language = 1

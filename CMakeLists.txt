@@ -8,6 +8,20 @@ project(mcla LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# On PC the test backend is Direct3D 12; on Android it is Vulkan.
+if(ANDROID)
+    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "Android uses Vulkan" FORCE)
+    set(REXGLUE_USE_VULKAN ON CACHE BOOL "Android uses Vulkan" FORCE)
+else()
+    set(REXGLUE_USE_D3D12 ON CACHE BOOL "PC test backend" FORCE)
+    set(REXGLUE_USE_VULKAN OFF CACHE BOOL "PC test backend" FORCE)
+endif()
+set(REXGLUE_ENABLE_TRACY OFF CACHE BOOL "No profiler dependency" FORCE)
+set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "Not needed yet" FORCE)
+set(REXGLUE_BUILD_TESTS OFF CACHE BOOL "Build the game target only" FORCE)
+set(REXGLUE_VERSION_OVERRIDE "0.10.0-dev.android" CACHE STRING "Shared local SDK")
+set(REXGLUE_RECOMP_DEBUG_INFO "none" CACHE STRING "Keep the build small")
+
 include(generated/rexglue.cmake)
 
 # The SDK normally writes its binaries back into its own source checkout
@@ -31,7 +45,7 @@ function(mcla_stage_sdk_outputs directory)
         mcla_stage_sdk_outputs("${child_directory}")
     endforeach()
 endfunction()
-if(REXSDK_DIR)
+if(REXSDK_DIR AND NOT ANDROID)
     mcla_stage_sdk_outputs("${REXSDK_DIR}")
 endif()
 
@@ -40,13 +54,17 @@ set(MCLA_SOURCES
     src/main.cpp
 )
 
-if(WIN32)
+if(ANDROID)
+    # SDLActivity loads the native code as "libmain.so" and calls its main().
+    add_library(mcla SHARED ${MCLA_SOURCES})
+    set_target_properties(mcla PROPERTIES OUTPUT_NAME main)
+elseif(WIN32)
     add_executable(mcla WIN32 ${MCLA_SOURCES})
 else()
     add_executable(mcla ${MCLA_SOURCES})
 endif()
 
-rexglue_setup_target(mcla)
+rexglue_setup_target(mcla GPU_PLUGINS xenos)
 
 # rexruntime links imgui PRIVATE, so its include path never reaches the title
 # even though rex_app.h -> rex/ui/imgui_dialog.h -> imgui.h needs it. Link the
@@ -56,3 +74,12 @@ foreach(ui_dependency imgui renderdoc)
         target_link_libraries(mcla PRIVATE ${ui_dependency})
     endif()
 endforeach()
+
+if(ANDROID)
+    # The SDK's own SDL entry point selects the app name of the shared
+    # nfsmw project. Keep the SDK untouched and select "mcla" here.
+    get_target_property(mcla_app_sources mcla SOURCES)
+    list(FILTER mcla_app_sources EXCLUDE REGEX "(^|/)windowed_app_main_sdl\\.cpp$")
+    set_property(TARGET mcla PROPERTY SOURCES "${mcla_app_sources}")
+    target_sources(mcla PRIVATE android/app/src/main/cpp/mcla_entry.cpp)
+endif()
