@@ -1,0 +1,62 @@
+// MCLA 360: the on-screen gamepad's bridge to the SDK.
+//
+// The Java overlay (com.mcla.android.TouchPadView) draws the pad and reads
+// the touches; it hands the state here, and the SDK's SDL input driver
+// publishes it as the synthetic touch controller, so the game sees an
+// ordinary Xbox 360 pad (its menus and button prompts work unchanged).
+//
+// The feed point is the SDK's own (rex_sdl_set_touch_gamepad_state), the
+// same one the NFS Most Wanted port uses: the SDK already creates a
+// synthetic controller for it, so no SDL virtual gamepad is needed here and
+// the pad works from the first frame.
+//
+// Compiled into the game's libmain.so: Java looks JNI functions up only in
+// the libraries it loaded itself.
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
+#include <jni.h>
+
+#include <cstdint>
+
+// The SDK's touch feed (sdk/include/rex/input/sdl/sdl_input_driver.h).
+// Declared here so this file does not drag the whole SDL input driver
+// header (and with it the SDL3 include path) into the app's build.
+extern "C" void rex_sdl_set_touch_gamepad_state(uint16_t buttons, int16_t left_x, int16_t left_y,
+                                                 int16_t right_x, int16_t right_y,
+                                                 uint8_t left_trigger, uint8_t right_trigger);
+
+namespace {
+
+// The view sends the sticks as -1..1, with right and down positive.
+int16_t Axis(float v) {
+  if (v > 1.0f) v = 1.0f;
+  if (v < -1.0f) v = -1.0f;
+  return static_cast<int16_t>(v * 32767.0f);
+}
+
+// A trigger: the view sends 0..1, XInput wants 0..255.
+uint8_t Trigger(float v) {
+  if (v <= 0.0f) return 0;
+  if (v >= 1.0f) return 255;
+  return static_cast<uint8_t>(v * 255.0f + 0.5f);
+}
+
+}  // namespace
+
+// buttons: the XInput button bits (X_INPUT_GAMEPAD_*).
+// sticks: -1..1 (the view's convention: down and right positive).
+// triggers: 0..1.
+extern "C" JNIEXPORT void JNICALL
+Java_com_mcla_android_TouchPadView_nativeSetState(JNIEnv*, jclass, jint buttons, jfloat lx, jfloat ly,
+                                                    jfloat rx, jfloat ry, jfloat lt, jfloat rt) {
+  rex_sdl_set_touch_gamepad_state(
+      static_cast<uint16_t>(buttons),
+      Axis(lx),
+      // XInput's Y axis points up; the view's points down.
+      static_cast<int16_t>(-Axis(ly)),
+      Axis(rx),
+      static_cast<int16_t>(-Axis(ry)),
+      Trigger(lt),
+      Trigger(rt));
+}

@@ -8,13 +8,14 @@ project(mcla LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# On PC the test backend is Direct3D 12; on Android it is Vulkan.
-if(ANDROID)
-    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "Android uses Vulkan" FORCE)
-    set(REXGLUE_USE_VULKAN ON CACHE BOOL "Android uses Vulkan" FORCE)
-else()
+# The graphics backend. The SDK only supports D3D12 on Windows; on Linux and
+# Android it is Vulkan, and it forces REXGLUE_USE_D3D12 off there.
+if(WIN32)
     set(REXGLUE_USE_D3D12 ON CACHE BOOL "PC test backend" FORCE)
     set(REXGLUE_USE_VULKAN OFF CACHE BOOL "PC test backend" FORCE)
+else()
+    set(REXGLUE_USE_D3D12 OFF CACHE BOOL "Only Windows has D3D12" FORCE)
+    set(REXGLUE_USE_VULKAN ON CACHE BOOL "Vulkan everywhere else" FORCE)
 endif()
 set(REXGLUE_ENABLE_TRACY OFF CACHE BOOL "No profiler dependency" FORCE)
 set(REXGLUE_ENABLE_FIDELITYFX OFF CACHE BOOL "Not needed yet" FORCE)

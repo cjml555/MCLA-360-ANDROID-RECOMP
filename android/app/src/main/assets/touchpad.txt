@@ -1,0 +1,2 @@
+# What the on-screen buttons say, one per line: BUTTON=Label (A B X Y LB RB LT RT BACK START L3 R3).
+# Empty: the buttons show only their names.
