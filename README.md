@@ -4,12 +4,18 @@ Recompilación de **Midnight Club: Los Angeles** (Xbox 360, PowerPC) a ejecutabl
 nativo, usando [ReXGlue](https://github.com/tynyl/tree/ReXGlue) — el mismo SDK
 que usa el port de *Need for Speed: Carbon* de este repositorio.
 
-> **Estado: Proof of Concept.** El juego arranca, inicializa la emulación de GPU
-> Xenos sobre Vulkan, carga los shaders del menú (50 pipelines gráficos creados)
-> y **se queda vivo** sin errores fatales. Aún **no** hay APK para Android:
-> falta el proyecto Gradle y portar el arranque del launcher.
+> **Estado: Proof of Concept.**
 >
-> Última dirección resuelta: `0x822C9DD8`. Quedan declaradas 68 entradas a
+> - **PC:** el juego arranca, inicializa la emulación de GPU Xenos sobre
+>   Vulkan, carga los shaders del menú (256 pipelines gráficos creados) y **se
+>   queda vivo** sin errores fatales. La pantalla de título de *Midnight Club:
+>   Los Angeles Complete Edition* renderiza con texturas, iluminación y
+>   tráfico animado.
+> - **Android:** hay **APK de release** (`com.mcla.android` 0.1.0, arm64-v8a,
+>   21.5 MB, firmado y alineado). Construido con
+>   `scripts/port_android.sh`. Falta probarlo en el dispositivo.
+>
+> Última dirección resuelta: `0x82554080`. Quedan declaradas 68 entradas a
 > mano en `mcla_analysis.toml`.
 
 ## Qué hay aquí
@@ -190,6 +196,45 @@ El log va a `out/pc/logs/`.
 python3 scripts/fix_gap_crashes.py --max-rondas 40
 ```
 
+## Android
+
+El port de Android necesita dos preparativos, porque el SDK compartido
+(`nfsmw-android`) tiene su rama Android a medio hacer.
+
+### 1. Parchar el SDK
+
+```bash
+python3 scripts/patch_sdk_for_android.py
+```
+
+Dos piezas del SDK no pueden enlazar tal cual:
+
+- `src/ui/CMakeLists.txt` enlaza `rex_android_gpu_driver`, un target que
+  nadie define → *unable to find library -lrex_android_gpu_driver*.
+- `src/ui/vulkan/vulkan_instance.cpp` abre la instancia de Vulkan con un
+  cargador propio (`rex_android_open_vulkan`) implementado en
+  `android_gpu_driver.cpp`, un archivo que el CMakeLists del SDK no
+  compila → *undefined symbol: rex_android_open_vulkan*.
+
+Son el cargador de Vulkan con los hooks del driver de Adreno, que no está en
+el checkout. El parche usa el **cargador estándar de Vulkan** del sistema,
+como hace el [fork de GenryTheFox0](https://github.com/GenryTheFox0/rexglue-android).
+Se deshace con `--revert`.
+
+### 2. Construir el APK
+
+```bash
+scripts/port_android.sh          # o --install para instalarlo por adb
+```
+
+El script parchea el `CMakeLists.txt` del proyecto con la rama Android
+(`add_library SHARED` + `OUTPUT_NAME main`), compila con el NDK, stagea las
+librerías en `jniLibs/` y llama a Gradle.
+
+El APK sale en `android/app/build/outputs/apk/release/app-release.apk` y no
+incluye los datos del juego: el usuario copia su carpeta
+(`default.xex`, `*.bik`, `*.rpf`) a `<sdcard>/MCLA`.
+
 ## El XEX
 
 El launcher **rechaza** cualquier otro `default.xex`: el código recompilado y
@@ -201,6 +246,7 @@ los ganchos dependen de sus direcciones. Esta copia es la verificada:
 | Media ID | `5940C9DB` |
 | Versión | `0.0.0.8` |
 | Fecha | 2009-07-17 22:23:19 UTC |
+| sha256 (`default.xex`) | `c386f4001fa569e6ad4b982f441f67412f00b3f47c166134555cd4b59854a432` |
 
 Si tienes un ISO, **no lo abras con `7z`**: un dump de Xbox 360 usa XDVDFS,
 no ISO9660, así que `7z` solo listará la capa DVD-vídeo y terminará con
