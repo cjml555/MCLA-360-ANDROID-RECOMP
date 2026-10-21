@@ -12,7 +12,7 @@
 #
 # Uso:
 #   scripts/port_android.sh [--sdk <android-sdk>] [--ndk <ndk>] [--jobs N]
-#                            [--abi arm64-v8a] [--install]
+#                            [--abi arm64-v8a] [--install] [--dry-run]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,6 +21,7 @@ NDK=""
 JOBS="$(nproc 2>/dev/null || echo 4)"
 ABI="arm64-v8a"
 INSTALL=0
+DRY_RUN=0
 REXSDK_DIR="$ROOT/../nfsmw-android/sdk"
 
 while [ $# -gt 0 ]; do
@@ -30,6 +31,7 @@ while [ $# -gt 0 ]; do
     --jobs) JOBS="$2"; shift 2 ;;
     --abi) ABI="$2"; shift 2 ;;
     --install) INSTALL=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "opcion desconocida: $1" >&2; exit 1 ;;
   esac
@@ -40,12 +42,34 @@ fail() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ---- herramientas
 [ -d "$SDK" ] || fail "Android SDK no encontrado en $SDK (usa --sdk)"
+
+# La version del NDK la fija el proyecto: ndkVersion en android/app/build.gradle.
+# NO se elige "la mas nueva instalada": un NDK distinto al fijado rompe el
+# build (toolchain, libc++ y el ABI de las libs nativas), y el error sale
+# como un fallo de CMake que no menciona el NDK.
+REQUIRED_NDK="$(sed -n "s/.*ndkVersion[[:space:]]*'\([^']*\)'.*/\1/p" \
+  "$ROOT/android/app/build.gradle" 2>/dev/null | head -1)"
+
 if [ -z "$NDK" ]; then
-  # El proyecto pide una version exacta: la toma la primera que exista.
-  NDK=$(ls -d "$SDK"/ndk/*/ 2>/dev/null | sort -V | tail -1 || true)
-  NDK="${NDK%/}"
+  if [ -n "$REQUIRED_NDK" ]; then
+    NDK="$SDK/ndk/$REQUIRED_NDK"
+    [ -d "$NDK" ] || fail "el proyecto pide el NDK $REQUIRED_NDK (ndkVersion en android/app/build.gradle) y no esta en $SDK/ndk.
+  Instalalo con: sdkmanager \"ndk;$REQUIRED_NDK\"
+  O usa --ndk <ruta> para forzar otro."
+  else
+    # Sin ndkVersion declarado: se cae a la mas nueva instalada.
+    NDK=$(ls -d "$SDK"/ndk/*/ 2>/dev/null | sort -V | tail -1 || true)
+    NDK="${NDK%/}"
+  fi
 fi
 [ -n "$NDK" ] && [ -d "$NDK" ] || fail "NDK no encontrado (usa --ndk)"
+
+# Un NDK a medias (sin source.properties) rompe el toolchain de CMake.
+[ -f "$NDK/source.properties" ] || fail "el NDK $NDK no tiene source.properties: instalacion incompleta, reinstala el paquete"
+if [ -n "$REQUIRED_NDK" ]; then
+  PKG_REV="$(sed -n 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$NDK/source.properties" | tr -d '\r')"
+  [ "$PKG_REV" = "$REQUIRED_NDK" ] || say "AVISO: el NDK elegido es $PKG_REV y el proyecto pide $REQUIRED_NDK"
+fi
 
 CMAKE="$SDK/cmake/3.31.6/bin/cmake"
 [ -x "$CMAKE" ] || CMAKE="$(command -v cmake || true)"
@@ -61,6 +85,11 @@ LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 say "SDK:   $SDK"
 say "NDK:   $NDK"
 say "ABI:   $ABI  ($JOBS hilos)"
+
+if [ "$DRY_RUN" = 1 ]; then
+  say "dry-run: se para aqui, no se compila nada"
+  exit 0
+fi
 
 # ---- 1. rama Android en el CMakeLists.txt del proyecto
 LISTS="$ROOT/CMakeLists.txt"

@@ -284,11 +284,18 @@ Se deshace todo con `--revert`.
 
 ```bash
 scripts/port_android.sh          # o --install para instalarlo por adb
+scripts/port_android.sh --dry-run   # solo comprueba el toolchain, no compila
 ```
 
 El script parchea el `CMakeLists.txt` del proyecto con la rama Android
 (`add_library SHARED` + `OUTPUT_NAME main`), compila con el NDK, stagea las
 librerías en `jniLibs/` y llama a Gradle.
+
+El NDK lo elige **`ndkVersion` de `android/app/build.gradle`**, no "la última
+instalada": un NDK distinto al fijado rompe el toolchain de CMake y el error
+no menciona el NDK. Si el paquete no está en el SDK, el script lo dice y
+manda el comando de `sdkmanager`; con `--ndk` se fuerza otro a propósito
+(el script avisa si no coincide con el del proyecto).
 
 El APK sale en `android/app/build/outputs/apk/release/app-release.apk` y no
 incluye los datos del juego: el usuario copia su carpeta
