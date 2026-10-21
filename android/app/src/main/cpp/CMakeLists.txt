@@ -33,6 +33,14 @@ target_sources(mcla PRIVATE mcla_entry.cpp)
 # The FPS counters the launcher's readout and the per-frame CSV read.
 target_sources(mcla PRIVATE mcla_performance.cpp)
 
+# The SDK compiles the perf counters in every build except Release. The
+# Android APK is Release, and the counters are what the launcher's FPS
+# readout and the per-frame CSV need, so turn them on here too: they are a
+# few atomics per frame.
+# (The SDK patch does the same for the runtime; this target is the game
+# project, which the SDK does not touch.)
+target_compile_definitions(mcla PRIVATE REXGLUE_ENABLE_PERF_COUNTERS)
+
 if(TARGET SDL3-shared)
     set_target_properties(SDL3-shared PROPERTIES OUTPUT_NAME SDL3 DEBUG_POSTFIX ""
         RELEASE_POSTFIX "" RELWITHDEBINFO_POSTFIX "" MINSIZEREL_POSTFIX "")

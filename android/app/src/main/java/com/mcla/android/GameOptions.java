@@ -67,7 +67,7 @@ final class GameOptions {
     static final Option FPS_OVERLAY = new Option("fps_overlay", "Mostrar los FPS", null, "true",
             new String[]{"true", "false"}, new String[]{"Sí", "No"});
 
-    static final Option FRAME_LOG = new Option("frame_log", "Registrar los fotogramas en CSV", null, "false",
+    static final Option FRAME_LOG = new Option("frame_log", "Registrar los fotogramas en CSV", null, "true",
             new String[]{"false", "true"}, new String[]{"No", "Sí · mcla-frames.csv"});
 
     static final Option DEBUG_OVERLAY = new Option("debug_overlay", "Overlay de depuración del SDK", null, "false",

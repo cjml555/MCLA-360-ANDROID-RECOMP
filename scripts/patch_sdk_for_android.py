@@ -89,10 +89,6 @@ def main():
                          BROKEN_SDL, FIXED_SDL, "thirdparty/CMakeLists.txt")
     changed |= patch_file(sdk / "CMakeLists.txt",
                          BROKEN_PERF, FIXED_PERF, "CMakeLists.txt")
-    changed |= patch_file(sdk / "src" / "ui" / "presenter.cpp",
-                         BROKEN_PRESENTER, FIXED_PRESENTER, "src/ui/presenter.cpp")
-    changed |= patch_file(sdk / "src" / "ui" / "presenter.cpp",
-                         BROKEN_DECL, FIXED_DECL, "src/ui/presenter.cpp (declaracion)")
     if not changed:
         print("no habia nada que parchear")
     return 0
@@ -189,41 +185,18 @@ FIXED_PERF = """if(REXGLUE_ENABLE_PERF_COUNTERS)
     endif()
 endif()"""
 
-# --- 5. avisar de cada fotograma presentado ------------------------------
+# --- 5. (retirado) hook del presentador ----------------------------------
 #
-# El SDK lleva un registro de contadores (rex::perf) que su overlay de
-# depuracion lee, pero nada los rellena: kFrameTimeUs y kFps se quedan a
-# cero. Presenter::PaintAndPresent es el punto donde termina cada
-# fotograma, asi que ahi se avisa al proyecto, que publica el tiempo entre
-# fotogramas en el contador y en el CSV.
+# Seatia avisar desde Presenter::PaintAndPresent, pero no hace falta: el SDK
+# ya mide los fotogramas en su propio hook de swap
+# (CommandProcessor::ExecutePacketType3_XE_SWAP), que cronometra el tiempo
+# entre swaps y lo publica en el registro de contadores con
+# PROFILE_FRAME_TIME_US() y PROFILE_FPS(). Ese hook vive en el runtime, no
+# en el juego, asi que un simbolo debil en libmain.so no lo encontraria
+# (el runtime se carga en su propio namespace).
 #
-# El proyecto define MclaNotifyFramePresentado (mcla_performance.cpp). En el
-# escritorio no hay nada que avise, y la llamada es inocua.
-
-BROKEN_PRESENTER = """  PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
-  switch (result) {
-    case PaintResult::kPresented:
-      surface_paint_connection_was_optimal_at_successful_paint_ = true;
-      break;"""
-
-FIXED_PRESENTER = """  PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
-  switch (result) {
-    case PaintResult::kPresented:
-      surface_paint_connection_was_optimal_at_successful_paint_ = true;
-      MclaNotifyFramePresentado();
-      break;"""
-
-# La declaracion del hook. Se declara debil para que el proyecto pueda no
-# definirla: en ese caso la llamada no hace nada.
-BROKEN_DECL = """#include <rex/ui/window.h>
-"""
-
-FIXED_DECL = """#include <rex/ui/window.h>
-
-// The game project may publish the time between frames here (MCLA's launcher
-// shows the FPS). Weak: without the project defining it, the call is a no-op.
-extern "C" __attribute__((weak)) void MclaNotifyFramePresentado();
-"""
+# Con el parche 4 (los contadores tambien en Release) el SDK mide el FPS y
+# escribe el CSV, y el launcher solo tiene que leerlos.
 
 
 def patch_vulkan_loader(sdk, revert):

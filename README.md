@@ -102,6 +102,22 @@ Con `librexruntime.so` en el namespace de la app, el `dlopen` del plugin
 desde dentro sí lo encuentra. (Es lo que hace el
 [fork de GenryTheFox0](https://github.com/GenryTheFox0/rexglue-android).)
 
+### Los contadores de FPS ya están en el SDK
+
+No hace falta cronometrar los fotogramas a mano: el hook de swap del SDK
+(`CommandProcessor::ExecutePacketType3_XE_SWAP`) mide el tiempo entre swaps
+y lo publica en el registro de contadores con `PROFILE_FRAME_TIME_US()` y
+`PROFILE_FPS()`. El launcher solo tiene que leer
+`rex::perf::GetSnapshotCounter(kFrameTimeUs)`.
+
+Lo que sí hace falta es **activar los contadores en Release**: el SDK los
+compila solo fuera de Release (`add_compile_definitions($<$<NOT:$<CONFIG:
+Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)`). El 4º parche los habilita
+también en Android, donde el APK es Release.
+
+Un símbolo `weak` definido en el juego tampoco serviría: el hook que mide
+los fotogramas vive en el runtime, que se carga en su propio namespace.
+
 ### Un `SIGBUS` que no era del juego
 
 La arena de memoria del invitado se respalda en `tmpfs`
