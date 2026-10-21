@@ -219,7 +219,13 @@ Dos piezas del SDK no pueden enlazar tal cual:
 Son el cargador de Vulkan con los hooks del driver de Adreno, que no está en
 el checkout. El parche usa el **cargador estándar de Vulkan** del sistema,
 como hace el [fork de GenryTheFox0](https://github.com/GenryTheFox0/rexglue-android).
-Se deshace con `--revert`.
+
+Y una tercera: `thirdparty/CMakeLists.txt` compila SDL3 **estática**, pero el
+`SDLActivity` de SDL carga `libSDL3.so` con `System.loadLibrary`. Sin la
+compartida, el juego muere al arrancar con *dlopen failed: library
+"libSDL3.so" not found*. El parche la compila como compartida en Android.
+
+Se deshace todo con `--revert`.
 
 ### 2. Construir el APK
 

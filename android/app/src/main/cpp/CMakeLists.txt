@@ -30,6 +30,9 @@ target_link_libraries(mcla PRIVATE rexgpu-xenos)
 # "mcla" app creator.
 target_sources(mcla PRIVATE mcla_entry.cpp)
 
+# The FPS counters the launcher's readout and the per-frame CSV read.
+target_sources(mcla PRIVATE mcla_performance.cpp)
+
 if(TARGET SDL3-shared)
     set_target_properties(SDL3-shared PROPERTIES OUTPUT_NAME SDL3 DEBUG_POSTFIX ""
         RELEASE_POSTFIX "" RELWITHDEBINFO_POSTFIX "" MINSIZEREL_POSTFIX "")

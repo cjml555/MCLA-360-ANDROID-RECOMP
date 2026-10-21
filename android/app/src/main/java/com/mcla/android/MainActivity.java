@@ -29,6 +29,8 @@ public final class MainActivity extends Activity {
     /** Where the game folder lives: <sdcard>/MCLA. */
     public static final String GAME_FOLDER_NAME = "MCLA";
 
+    private TextView updatesLabel;
+
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -86,6 +88,16 @@ public final class MainActivity extends Activity {
                     startActivityForResult(
                             new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), 1)));
         }
+
+        // --- Options ---
+        body.addView(section("OPCIONES"));
+        body.addView(action("Abrir las opciones", false, this::showOptions));
+
+        // --- Updates ---
+        body.addView(section("ACTUALIZACIONES"));
+        body.addView(action("Buscar actualizaciones", false, this::checkUpdates));
+        updatesLabel = info("");
+        body.addView(updatesLabel);
 
         // --- Storage permission ---
         if (!hasStoragePermission()) {
@@ -163,5 +175,59 @@ public final class MainActivity extends Activity {
     private int dp(int value) {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value,
                 getResources().getDisplayMetrics()));
+    }
+
+    // --- Options ---
+
+    /** A dialog with one switch-like row per option. */
+    private void showOptions() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        for (GameOptions.Option option : GameOptions.ALL) {
+            String current = GameOptions.get(this, option.key);
+            TextView row = new TextView(this);
+            row.setText(option.title + "\n" + option.label(current));
+            row.setTextColor(0xFFC7D0DB);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            row.setPadding(0, dp(10), 0, dp(10));
+            row.setOnClickListener(v -> {
+                int index = 0;
+                for (int i = 0; i < option.values.length; i++) {
+                    if (option.values[i].equals(current)) index = i;
+                }
+                index = (index + 1) % option.values.length;
+                GameOptions.set(this, option.key, option.values[index]);
+                showOptions();  // reopen, so the new value is visible
+            });
+            box.addView(row);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Opciones")
+                .setView(box)
+                .setPositiveButton("Cerrar", null)
+                .show();
+    }
+
+    // --- Updates ---
+
+    /** Looks for a newer release on GitHub. Nothing is downloaded or installed. */
+    private void checkUpdates() {
+        if (updatesLabel == null) return;
+        updatesLabel.setText("Buscando…");
+        ReleaseUpdates.check(this, true, result -> {
+            if (result.error != null) {
+                updatesLabel.setText(result.error);
+            } else if (result.tag == null || result.tag.isEmpty()) {
+                updatesLabel.setText("No se encontró ninguna versión publicada.");
+            } else if (ReleaseVersion.newer(result.tag, ReleaseUpdates.installed(this))) {
+                updatesLabel.setText("Hay una versión nueva: " + result.tag
+                        + ". Descárgala desde " + result.url);
+            } else {
+                updatesLabel.setText("Esta es la última versión (" + result.tag + ").");
+            }
+        });
     }
 }

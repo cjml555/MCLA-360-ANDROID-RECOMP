@@ -75,12 +75,24 @@ def main():
         unpatch_file(sdk / "src" / "ui" / "CMakeLists.txt",
                      BROKEN, FIXED, "src/ui/CMakeLists.txt")
         patch_vulkan_loader(sdk, True)
+        unpatch_file(sdk / "thirdparty" / "CMakeLists.txt",
+                     BROKEN_SDL, FIXED_SDL, "thirdparty/CMakeLists.txt")
+        unpatch_file(sdk / "CMakeLists.txt",
+                     BROKEN_PERF, FIXED_PERF, "CMakeLists.txt")
         return 0
 
     changed = False
     changed |= patch_file(sdk / "src" / "ui" / "CMakeLists.txt",
                          BROKEN, FIXED, "src/ui/CMakeLists.txt")
     patch_vulkan_loader(sdk, False)
+    changed |= patch_file(sdk / "thirdparty" / "CMakeLists.txt",
+                         BROKEN_SDL, FIXED_SDL, "thirdparty/CMakeLists.txt")
+    changed |= patch_file(sdk / "CMakeLists.txt",
+                         BROKEN_PERF, FIXED_PERF, "CMakeLists.txt")
+    changed |= patch_file(sdk / "src" / "ui" / "presenter.cpp",
+                         BROKEN_PRESENTER, FIXED_PRESENTER, "src/ui/presenter.cpp")
+    changed |= patch_file(sdk / "src" / "ui" / "presenter.cpp",
+                         BROKEN_DECL, FIXED_DECL, "src/ui/presenter.cpp (declaracion)")
     if not changed:
         print("no habia nada que parchear")
     return 0
@@ -123,6 +135,95 @@ FIXED_LOADER = """#if REX_PLATFORM_ANDROID
 #else
   loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
 #endif"""
+
+# --- 3. SDL3 como libreria compartida -------------------------------------
+#
+# El lado Java de SDL (SDLActivity, que usa el proyecto) carga "libSDL3.so"
+# y "libmain.so" con System.loadLibrary. El SDK, en cambio, compila SDL3 de
+# forma estatica (thirdparty/CMakeLists.txt: set(SDL_SHARED OFF ...)), asi
+# que el APK no lleva libSDL3.so y el juego muere al arrancar con
+# "dlopen failed: library libSDL3.so not found".
+#
+# En Android hay que compilarlo como compartida.
+
+BROKEN_SDL = """set(SDL_INSTALL ON CACHE BOOL "" FORCE)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)"""
+
+FIXED_SDL = """set(SDL_INSTALL ON CACHE BOOL "" FORCE)
+# Android's SDLActivity loads "libSDL3.so" with System.loadLibrary, so SDL3
+# has to be a shared library here. On the desktop it stays static.
+if(ANDROID)
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+else()
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+endif()"""
+
+# --- 4. los contadores de rendimiento en Release --------------------------
+#
+# El SDK compila los contadores de rendimiento (rex::perf) solo fuera de
+# Release:
+#
+#     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
+#
+# El APK es una build de Release, asi que el registro de fotogramas (el FPS
+# que muestra el launcher y el CSV) se quedaria sin compiling. En Android se
+# habilita tambien en Release: son unos atomicos, no un perfilador.
+#
+# El launcher de MCLA usa el contador para el HUD de FPS y para el CSV, asi
+# que hace falta en la build que se instala.
+
+BROKEN_PERF = """if(REXGLUE_ENABLE_PERF_COUNTERS)
+    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
+endif()"""
+
+FIXED_PERF = """if(REXGLUE_ENABLE_PERF_COUNTERS)
+    # On Android the counters are also compiled in Release: the launcher's FPS
+    # readout and the per-frame CSV need them, and they are a few atomics.
+    if(ANDROID)
+        add_compile_definitions(REXGLUE_ENABLE_PERF_COUNTERS)
+    else()
+        add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
+    endif()
+endif()"""
+
+# --- 5. avisar de cada fotograma presentado ------------------------------
+#
+# El SDK lleva un registro de contadores (rex::perf) que su overlay de
+# depuracion lee, pero nada los rellena: kFrameTimeUs y kFps se quedan a
+# cero. Presenter::PaintAndPresent es el punto donde termina cada
+# fotograma, asi que ahi se avisa al proyecto, que publica el tiempo entre
+# fotogramas en el contador y en el CSV.
+#
+# El proyecto define MclaNotifyFramePresentado (mcla_performance.cpp). En el
+# escritorio no hay nada que avise, y la llamada es inocua.
+
+BROKEN_PRESENTER = """  PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
+  switch (result) {
+    case PaintResult::kPresented:
+      surface_paint_connection_was_optimal_at_successful_paint_ = true;
+      break;"""
+
+FIXED_PRESENTER = """  PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
+  switch (result) {
+    case PaintResult::kPresented:
+      surface_paint_connection_was_optimal_at_successful_paint_ = true;
+      MclaNotifyFramePresentado();
+      break;"""
+
+# La declaracion del hook. Se declara debil para que el proyecto pueda no
+# definirla: en ese caso la llamada no hace nada.
+BROKEN_DECL = """#include <rex/ui/window.h>
+"""
+
+FIXED_DECL = """#include <rex/ui/window.h>
+
+// The game project may publish the time between frames here (MCLA's launcher
+// shows the FPS). Weak: without the project defining it, the call is a no-op.
+extern "C" __attribute__((weak)) void MclaNotifyFramePresentado();
+"""
 
 
 def patch_vulkan_loader(sdk, revert):
