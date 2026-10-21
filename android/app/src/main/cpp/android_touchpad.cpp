@@ -5,10 +5,10 @@
 // publishes it as the synthetic touch controller, so the game sees an
 // ordinary Xbox 360 pad (its menus and button prompts work unchanged).
 //
-// The feed point is the SDK's own (rex_sdl_set_touch_gamepad_state), the
-// same one the NFS Most Wanted port uses: the SDK already creates a
-// synthetic controller for it, so no SDL virtual gamepad is needed here and
-// the pad works from the first frame.
+// The feed point is the SDK's own (rex_sdl_set_touch_gamepad_state), the same
+// one the NFS Most Wanted port uses: the SDK already creates a synthetic
+// controller for it, so no SDL virtual gamepad is needed here and the pad
+// works from the first frame.
 //
 // Compiled into the game's libmain.so: Java looks JNI functions up only in
 // the libraries it loaded itself.
@@ -19,12 +19,11 @@
 
 #include <cstdint>
 
-// The SDK's touch feed (sdk/include/rex/input/sdl/sdl_input_driver.h).
-// Declared here so this file does not drag the whole SDL input driver
-// header (and with it the SDL3 include path) into the app's build.
-extern "C" void rex_sdl_set_touch_gamepad_state(uint16_t buttons, int16_t left_x, int16_t left_y,
-                                                 int16_t right_x, int16_t right_y,
-                                                 uint8_t left_trigger, uint8_t right_trigger);
+#include <android/log.h>
+
+#include <rex/input/sdl/sdl_input_driver.h>
+
+#define TAG "MCLA-pad"
 
 namespace {
 
@@ -42,6 +41,11 @@ uint8_t Trigger(float v) {
   return static_cast<uint8_t>(v * 255.0f + 0.5f);
 }
 
+// Releases every button, stick and trigger.
+void Release() {
+  rex_sdl_set_touch_gamepad_state(0, 0, 0, 0, 0, 0, 0);
+}
+
 }  // namespace
 
 // buttons: the XInput button bits (X_INPUT_GAMEPAD_*).
@@ -50,6 +54,8 @@ uint8_t Trigger(float v) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_mcla_android_TouchPadView_nativeSetState(JNIEnv*, jclass, jint buttons, jfloat lx, jfloat ly,
                                                     jfloat rx, jfloat ry, jfloat lt, jfloat rt) {
+  __android_log_print(ANDROID_LOG_INFO, TAG, "estado botones=0x%x sticks=%f,%f,%f,%f",
+                      buttons, lx, ly, rx, ry);
   rex_sdl_set_touch_gamepad_state(
       static_cast<uint16_t>(buttons),
       Axis(lx),
@@ -59,4 +65,16 @@ Java_com_mcla_android_TouchPadView_nativeSetState(JNIEnv*, jclass, jint buttons,
       static_cast<int16_t>(-Axis(ry)),
       Trigger(lt),
       Trigger(rt));
+}
+
+// A real controller came or went: the touch pad steps aside so the real one
+// is the first player.
+//
+// There is nothing to attach or detach here: the SDK always has the
+// synthetic touch controller. What matters is releasing the state, so a
+// button held when a real pad arrives does not stay held behind it.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mcla_android_TouchPadView_nativeSetActive(JNIEnv*, jclass, jboolean active) {
+  Release();
+  return JNI_TRUE;
 }

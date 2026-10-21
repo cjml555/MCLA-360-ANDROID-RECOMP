@@ -33,6 +33,10 @@ target_sources(mcla PRIVATE mcla_entry.cpp)
 # The FPS counters the launcher's readout and the per-frame CSV read.
 target_sources(mcla PRIVATE mcla_performance.cpp)
 
+# The on-screen gamepad's bridge: the Java overlay hands the pad's state here
+# and the SDK publishes it as the synthetic touch controller.
+target_sources(mcla PRIVATE android_touchpad.cpp)
+
 # The SDK compiles the perf counters in every build except Release. The
 # Android APK is Release, and the counters are what the launcher's FPS
 # readout and the per-frame CSV need, so turn them on here too: they are a

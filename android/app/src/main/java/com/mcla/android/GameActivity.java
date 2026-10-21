@@ -39,6 +39,8 @@ public final class GameActivity extends SDLActivity {
 
     /** The FPS readout, on top of the game. */
     private TextView fpsLabel;
+    /** The on-screen gamepad, on top of the game's surface. */
+    private TouchPadView mTouchPad;
     private final android.os.Handler frameHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable updateFrames = new Runnable() {
@@ -118,6 +120,15 @@ public final class GameActivity extends SDLActivity {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         super.onCreate(state);
 
+        // The on-screen gamepad over the game. It goes on top of SDL's own
+        // layout (the RelativeLayout that holds the game's surface), and it
+        // hides itself while a real controller is connected.
+        if (mLayout != null) {
+            mTouchPad = new TouchPadView(this);
+            mLayout.addView(mTouchPad, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+
         // The FPS readout, on top of the game, when the option is on.
         if ("true".equals(GameOptions.get(this, GameOptions.FPS_OVERLAY.key))) {
             fpsLabel = new TextView(this);
@@ -172,6 +183,11 @@ public final class GameActivity extends SDLActivity {
         // kernel stubs report "no GPU emulation loaded" and the game waits
         // forever without drawing.
         args.add("--gpu_plugin=xenos");
+
+        // The keyboard/mouse driver, which the guest sees as an Xbox pad.
+        // It is the fallback for when there is no real controller, and the
+        // SDK's touch pad feeds the same input path.
+        args.add("--mnk_mode=true");
 
         // The log goes to the app's external folder so it can be read over USB.
         File external = getExternalFilesDir(null);
