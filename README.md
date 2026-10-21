@@ -75,6 +75,31 @@ El ciclo se detiene solo cuando el juego deja de reventar con ese error.
 
 ## Trampas que costaron tiempo
 
+### En Android, el runtime tiene que cargarse con `System.loadLibrary`
+
+El SDK busca el plugin de la GPU por nombre (`dlopen("librexgpu-xenos.so")`).
+En Android eso **solo** encuentra una biblioteca que la app ya haya cargado
+con `System.loadLibrary`: el `dlopen` de una ruta absoluta no comparte el
+namespace del enlazador.
+
+El `SDLActivity` de SDL carga con `System.loadLibrary` lo que devuelve
+`getLibraries()`, pero el `libmain.so` del juego lo carga **por ruta**
+(`nativeLibraryDir + "/libmain.so"`), en su propio namespace. Por eso el
+plugin no se encontraba y el juego se quedaba esperando, sin dibujar.
+
+El arreglo es overridear `getLibraries()` para incluir el runtime:
+
+```java
+@Override
+protected String[] getLibraries() {
+    return new String[]{"SDL3", "rexruntime", "main"};
+}
+```
+
+Con `librexruntime.so` en el namespace de la app, el `dlopen` del plugin
+desde dentro sí lo encuentra. (Es lo que hace el
+[fork de GenryTheFox0](https://github.com/GenryTheFox0/rexglue-android).)
+
 ### Un `SIGBUS` que no era del juego
 
 La arena de memoria del invitado se respalda en `tmpfs`

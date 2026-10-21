@@ -23,15 +23,6 @@ class MclaApp : public rex::ReXApp {
     config.gpu_plugin = "xenos";
   }
 
-#if REX_PLATFORM_ANDROID
-  // The settings (mcla.toml) live in the app's own folder, the one the
-  // launcher points at with REX_APP_FOLDER. Without this the SDK looks for
-  // them next to the executable, which on Android is /system/bin.
-  void OnConfigurePaths(rex::PathConfig& paths) override {
-    paths.config_path = paths.user_data_root / "mcla.toml";
-  }
-#endif
-
   // Override virtual hooks for customization:
   // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}

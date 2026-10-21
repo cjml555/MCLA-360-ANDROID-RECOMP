@@ -61,6 +61,36 @@ public final class GameActivity extends SDLActivity {
     private static native long nativeFramesPresented();
     private static native void nativeStartFrameLog(String path);
 
+    /**
+     * The libraries the native side needs, in the order they must load.
+     *
+     * The default is {"SDL3", "main"}: SDL3 with its own JNI side, then the
+     * game's shared object. But the runtime (librexruntime.so) holds the
+     * graphics system that dlopen()s the GPU plugin, so it has to be in the
+     * app's linker namespace too: a library loaded with System.loadLibrary is
+     * visible to the ones loaded after it, and the plugin is found by soname.
+     */
+    @Override
+    protected String[] getLibraries() {
+        return new String[]{"SDL3", "rexruntime", "main"};
+    }
+
+    /**
+     * Keep the phone in landscape.
+     *
+     * SDL asks the activity to change orientation when it creates the window,
+     * and with a resizable window and no hint it asks for FULL_USER, which
+     * lets the phone turn the screen: the surface then arrives portrait
+     * (1080x2400) while the swapchain was made landscape (2400x1080), and
+     * the game waits forever for a frame that never comes.
+     *
+     * The game is a 16:9 console game: it only ever runs in landscape.
+     */
+    @Override
+    public void setRequestedOrientation(int requestedOrientation) {
+        super.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+    }
+
     @Override
     protected void onCreate(Bundle state) {
         File appRoot = new File(getFilesDir(), "mcla");
@@ -137,6 +167,12 @@ public final class GameActivity extends SDLActivity {
         args.add("--cache_root=" + cacheRoot);
         args.add("--metadata_root=" + userRoot);
 
+        // The Xenos GPU emulation. The command line wins over the settings
+        // file, and without it the game has no graphics system at all: the
+        // kernel stubs report "no GPU emulation loaded" and the game waits
+        // forever without drawing.
+        args.add("--gpu_plugin=xenos");
+
         // The log goes to the app's external folder so it can be read over USB.
         File external = getExternalFilesDir(null);
         File logs = external != null ? new File(external, "logs") : new File(userRoot, "logs");
@@ -153,6 +189,10 @@ public final class GameActivity extends SDLActivity {
                 Log.w(TAG, "nativeStartFrameLog", ignored);
             }
         }
+
+        // The SDK's own log for the rest of the port: the same folder, so a
+        // single copy of the logs is enough to see what happened.
+        args.add("--log_level=info");
 
         // Testing: one extra argument per line in
         // Android/data/com.mcla.android/files/args.txt (written over USB; the
