@@ -11,9 +11,11 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 >   queda vivo** sin errores fatales. La pantalla de título de *Midnight Club:
 >   Los Angeles Complete Edition* renderiza con texturas, iluminación y
 >   tráfico animado.
-> - **Android:** hay **APK de release** (`com.mcla.android` 0.1.0, arm64-v8a,
->   21.5 MB, firmado y alineado). Construido con
->   `scripts/port_android.sh`. Falta probarlo en el dispositivo.
+> - **Android:** el juego **corre en el móvil** (Motorola Edge 50 Fusion,
+>   Android 16). Llega a la pantalla de título: 292 pipelines gráficos, 0
+>   errores fatales, 99.9% de fotogramas sin espera, audio sin silencios y el
+>   HUD de FPS encima. APK de release (`com.mcla.android` 0.1.0, arm64-v8a,
+>   21.7 MB) con `scripts/port_android.sh`.
 >
 > Última dirección resuelta: `0x82554080`. Quedan declaradas 68 entradas a
 > mano en `mcla_analysis.toml`.
