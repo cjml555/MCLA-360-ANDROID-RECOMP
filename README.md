@@ -18,12 +18,16 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 >   (`com.mcla.android` 0.1.0, arm64-v8a, 21.7 MB) con
 >   `scripts/port_android.sh`.
 >
-> **Lo que falta:** el "PRESS ▶" de la pantalla de título no avanza. El SDK
-> registra un gamepad táctil (`Android touch gamepad is ready`), pero falta la
-> vista Java que dibuje los botones en pantalla, así que no hay forma de
-> mandar una pulsación al juego.
+> **Lo que falta:** el "PRESS ▶" de la pantalla de título no avanza. El
+> gamepad táctil está en pantalla (stick, cruceta, LT/LB/L3, RT/RB/R3 y
+> A B X Y), y su puente pasa el estado al mando sintético del SDK. Al
+> pulsar entraba en el código de input y colgaba en un hueco de la tabla
+> de funciones (`0x82554080`, ya declarado). Queda por confirmar que el
+> título avanza al pulsar, con el dispositivo sin uso en primer plano: con
+> otra app delante, Android mata el juego por memoria (1.3 GB) y no se
+> puede probar.
 >
-> Última dirección resuelta: `0x82554080`. Quedan declaradas 68 entradas a
+> Última dirección resuelta: `0x82554080`. Quedan declaradas 76 entradas a
 > mano en `mcla_analysis.toml`.
 
 ## Qué hay aquí
@@ -289,6 +293,34 @@ librerías en `jniLibs/` y llama a Gradle.
 El APK sale en `android/app/build/outputs/apk/release/app-release.apk` y no
 incluye los datos del juego: el usuario copia su carpeta
 (`default.xex`, `*.bik`, `*.rpf`) a `<sdcard>/MCLA`.
+
+### 3. El gamepad táctil
+
+El SDK ya trae la parte difícil: en Android crea un mando sintético
+(`is_touch = true`, `synthetic = true` → usuario 0) y publica su estado con
+`rex_sdl_set_touch_gamepad_state(botones, lx, ly, rx, ry, lt, rt)`. Los
+botones son bits de XInput (`A = 0x1000`, `B = 0x2000`, `X = 0x4000`,
+`Y = 0x8000`).
+
+Lo que faltaba era la vista que dibuja el pad y llama a esa función:
+
+- `android/app/src/main/java/com/mcla/android/TouchPadView.java` — el pad
+  (sticks, cruceta, A B X Y, LT/RT/LB/RB, L3/R3, BACK/START) y las
+  etiquetas de `assets/touchpad.txt`. Se esconde solo si hay un mando real
+  conectado.
+- `android/app/src/main/cpp/android_touchpad.cpp` — el puente JNI. Va
+  dentro de `libmain.so` porque Java solo busca funciones JNI en las
+  bibliotecas que cargó él mismo.
+
+Dos cosas que costaron:
+
+- La vista necesita `setClickable(true)`: Android solo entrega los toques
+  a una vista que dice que los maneja.
+- Al pulsar entraba en el código de input y colgaba en un hueco de la
+  tabla de funciones (`0x82554080`, dentro del hueco de 64 bytes que
+  empieza en `0x82554060`). Declarado como ocho entradas de 8 bytes. El
+  ciclo automático de huecos no lo ve: solo se alcanza al pulsar, y el
+  ciclo no pulsa nada.
 
 ## El XEX
 
