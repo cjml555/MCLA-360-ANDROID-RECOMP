@@ -54,8 +54,9 @@ set(MCLA_SOURCES
     src/main.cpp
 )
 
+# Android: the game is libmain.so, which SDL3's activity loads and starts
+# through SDL_main. The project may add its own sources to the target.
 if(ANDROID)
-    # SDLActivity loads the native code as "libmain.so" and calls its main().
     add_library(mcla SHARED ${MCLA_SOURCES})
     set_target_properties(mcla PROPERTIES OUTPUT_NAME main)
 elseif(WIN32)
