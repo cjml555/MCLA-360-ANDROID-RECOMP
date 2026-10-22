@@ -11,6 +11,10 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 >   queda vivo** sin errores fatales. La pantalla de título de *Midnight Club:
 >   Los Angeles Complete Edition* renderiza con texturas, iluminación y
 >   tráfico animado.
+> - **PC, con pulsación:** el título **avanza**. El proyecto instala un mando
+>   de prueba en el input system del SDK (`src/mcla_scripted_pad.cpp`), así que
+>   el PC envía botones como el móvil. Con tres pulsaciones el juego crea 421
+>   pipelines frente a 280 del control, **sin un solo error fatal**.
 > - **Android:** el juego **corre en el móvil** (Motorola Edge 50 Fusion,
 >   Android 16). Llega a la pantalla de título: 292 pipelines gráficos, 0
 >   errores fatales, 99.9% de fotogramas sin espera, audio sin silencios y el
@@ -18,14 +22,11 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 >   (`com.mcla.android` 0.1.0, arm64-v8a, 21.7 MB) con
 >   `scripts/port_android.sh`.
 >
-> **Lo que falta:** el "PRESS ▶" de la pantalla de título no avanza. El
-> gamepad táctil está en pantalla (stick, cruceta, LT/LB/L3, RT/RB/R3 y
-> A B X Y), y su puente pasa el estado al mando sintético del SDK. Al
-> pulsar entraba en el código de input y colgaba en un hueco de la tabla
-> de funciones (`0x82554080`, ya declarado). Queda por confirmar que el
-> título avanza al pulsar, con el dispositivo sin uso en primer plano: con
-> otra app delante, Android mata el juego por memoria (1.3 GB) y no se
-> puede probar.
+> **Lo que falta:** confirmar en el móvil que el título avanza al pulsar, con
+> el dispositivo sin uso en primer plano: con otra app delante, Android mata
+> el juego por memoria (1.3 GB) y no se puede probar. En el PC eso ya está
+> resuelto y comprobado (`scripts/test_pad_press.sh`), pero falta el mismo
+> gesto en el táctil real.
 >
 > Última dirección resuelta: `0x82554080`. Quedan declaradas 76 entradas a
 > mano en `mcla_analysis.toml`.
@@ -37,8 +38,10 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 | `mcla_manifest.toml` | Manifiesto del proyecto ReXGlue. Declara la ruta del XEX y qué ficheros de análisis se incluyen. |
 | `mcla_analysis.toml` | **Fichero clave.** Declara a mano las direcciones que el análisis automático no puede atribuir a ninguna función. |
 | `src/main.cpp`, `src/mcla_app.h` | Punto de entrada de la app y sus hooks de configuración. |
+| `src/mcla_scripted_pad.cpp` | Mando de prueba: envía botones al guest en el PC, sin móvil. |
 | `scripts/fix_gap_crashes.py` | Ciclo automático que resuelve los huecos de código sin dueño. |
 | `scripts/huecos.py` | Localiza los huecos midiendo el C++ generado (viene del SDK). |
+| `scripts/test_pad_press.sh` | Prueba la pulsación en el PC y reporta los errores fatales. |
 | `generated/rexglue.cmake` | Boilerplate del SDK (versionado). El resto de `generated/` se regenera y no se versiona. |
 
 ## El problema que resuelve este PoC
@@ -328,6 +331,40 @@ Dos cosas que costaron:
   empieza en `0x82554060`). Declarado como ocho entradas de 8 bytes. El
   ciclo automático de huecos no lo ve: solo se alcanza al pulsar, y el
   ciclo no pulsa nada.
+
+### 4. Probar la pulsación en el PC
+
+El PC no puede mandar una tecla al juego: el servidor X de esta sesión
+rechaza todo evento de teclado sintético (comprobado con `XQueryKeymap`:
+ningún keycode mueve el keymap), y el SDL del proyecto es estático, así que
+`SDL_PushEvent` desde otro proceso nunca llega a la cola del juego. La
+única forma de enviar un botón sin el móvil era el propio móvil.
+
+`src/mcla_scripted_pad.cpp` lo resuelve: es un `rex::input::InputDriver`
+que el proyecto instala en el input system del SDK (por la API pública
+`InputSystem::AddDriver`, sin tocar el SDK) y que publica un botón XInput
+en un temporizador. El dispositivo es sintético, así que el `SlotAssignment`
+del SDK lo manda al usuario 0 del guest: **el PC recorre exactamente el
+mismo camino de código que el móvil**.
+
+```bash
+scripts/test_pad_press.sh                    # una pulsación de A
+scripts/test_pad_press.sh "2:0x1000,8:0x1000" # secuencia
+```
+
+Los tiempos son relativos a la **primera consulta** del guest al pad, no al
+inicio de la ejecución: el juego no mira el mando hasta que llega al título,
+unos 35 segundos después de arrancar. Un reloj que arrancase al instalar el
+driver dispararía cada pulsación antes de que nadie escuchara.
+
+Con una pulsación de A el título avanza: el juego carga una tanda de
+shaders que el control (sin pulsar) nunca carga, y la tanda que ambos
+comparten aparece 15 s antes. Con tres pulsaciones seguidas el juego crea
+421 pipelines frente a 280 del control, **sin un solo error fatal**: el hueco
+`0x82554080` que colgaba al pulsar en el móvil ya no aparece.
+
+Esto además abre el hunting de huecos a los que solo se llega pulsando, que
+el ciclo automático no podía ver.
 
 ## El XEX
 

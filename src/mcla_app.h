@@ -6,6 +6,8 @@
 
 #include <rex/rex_app.h>
 
+#include "mcla_scripted_pad.h"
+
 class MclaApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
@@ -21,6 +23,14 @@ class MclaApp : public rex::ReXApp {
   // game never reaches the menu.
   void OnPreSetup(rex::RuntimeConfig& config) override {
     config.gpu_plugin = "xenos";
+  }
+
+  // The runtime (and its input system) already exists here, and the guest
+  // has not started polling yet. This is where the scripted gamepad goes
+  // in, when MCLA_PAD_PRESS asks for it: it lets the PC send the guest a
+  // button press, which is the one thing the PC cannot do otherwise.
+  void OnPostSetup() override {
+    mcla::InstallScriptedGamepad(runtime()->input_system());
   }
 
   // Override virtual hooks for customization:

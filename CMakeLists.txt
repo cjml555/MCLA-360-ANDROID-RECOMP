@@ -53,6 +53,7 @@ endif()
 # Sources
 set(MCLA_SOURCES
     src/main.cpp
+    src/mcla_scripted_pad.cpp
 )
 
 # Android: the game is libmain.so, which SDL3's activity loads and starts
