@@ -162,6 +162,34 @@ def log_parts(stem):
     return [path for _, path in parts]
 
 
+def read_run_text(launched):
+    """Todo el log de la corrida, de todos los stems, en orden cronologico.
+
+    No basta con el stem: cuando el sink rotatorio llega a 5 MB renombra
+    el log actual a .1.log y abre uno nuevo CON OTRO NUMERO, asi que el
+    stem cambia a mitad de la corrida. Leyendo solo el ultimo se
+    pierden las lineas anteriores a la rotacion.
+    """
+    log_dir = ROOT / "out/pc/logs"
+    stems = {}
+    for path in log_dir.glob("mcla_*.log"):
+        m = LOG_PART_RE.match(path.name)
+        if not m:
+            continue
+        if path.stat().st_mtime <= launched:
+            continue
+        index = int(m.group(2)[1:]) if m.group(2) else 0
+        stems.setdefault(m.group(1), {})[index] = path
+    textos = []
+    for stem in sorted(stems, key=int):
+        for index in sorted(stems[stem], reverse=True):  # mas antigua primero
+            try:
+                textos.append(stems[stem][index].read_text(errors="replace"))
+            except OSError:
+                pass
+    return "\n".join(textos)
+
+
 def read_log(stem):
     """Concatena todas las partes de un log en orden cronologico."""
     return "\n".join(p.read_text(errors="replace") for p in log_parts(stem))
@@ -211,7 +239,10 @@ def launch(press_script=None, timeout=90):
     if not stems:
         return None, None
     stem = max(stems, key=lambda s: int(s))
-    text = read_log(stem)
+    # Todo el log de la corrida, de todos los stems: la rotacion cambia
+    # de stem a mitad de camino y el crash puede estar en la parte
+    # anterior.
+    text = read_run_text(launched)
     m = FATAL_RE.search(text)
     return stem, (int(m.group(1), 16) if m else None)
 
@@ -243,7 +274,8 @@ def launch_trigger(timeout=300):
         pass
 
     # El harness deja el log de la corrida con su numero. Se cogen los
-    # stems modificados hace poco.
+    # stems modificados hace poco, y se lee TODO el log de la corrida
+    # (la rotacion cambia de stem a mitad de camino).
     ahora = time.time()
     stems = set()
     for p in (ROOT / "out/pc/logs").glob("mcla_*.log"):
@@ -253,7 +285,7 @@ def launch_trigger(timeout=300):
     if not stems:
         return None, None
     stem = max(stems, key=lambda s: int(s))
-    text = read_log(stem)
+    text = read_run_text(ahora - (timeout + 300))
     m = FATAL_RE.search(text)
     return stem, (int(m.group(1), 16) if m else None)
 

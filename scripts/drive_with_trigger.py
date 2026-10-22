@@ -59,6 +59,41 @@ PATRON = ["0x1000", "0x1000", "0x0010", "0x1000", "0x0008",
 ENTRADA = ",".join(f"{3+i*3}:{PATRON[i]}" for i in range(len(PATRON)))
 
 
+def run_text(log_dir: Path, launched_at: float):
+    """Todo el log de la corrida, en orden cronologico.
+
+    Ojo: hay que gathering TODOS los stems, no solo el ultimo. Cuando el
+    sink rota, renombra el log actual a .1.log y abre uno nuevo con otro
+    numero: el "stem" cambia a mitad de la corrida. Leyendo solo el
+    ultimo, las lineas de antes de la rotacion se pierden, y el resumen
+    llegaba a decir "disparos: 0" con cinco disparos happening.
+    """
+    stems = {}
+    for p in log_dir.glob("mcla_*.log"):
+        m = re.match(r"^mcla_(\d+)(\.\d+)?\.log$", p.name)
+        if not m:
+            continue
+        if p.stat().st_mtime <= launched_at:
+            continue
+        stem = m.group(1)
+        # Dentro de un stem, la parte .N.log es ANTERIOR a la .log.
+        partes = stems.setdefault(stem, {})
+        # El grupo 2 viene como ".1", con el punto: hay que quitarlo.
+        indice = int(m.group(2)[1:]) if m.group(2) else 0
+        partes[indice] = p
+    textos = []
+    # Los stems en orden de numero (el mas bajo es el mas antiguo) y, en
+    # cada uno, de la parte mas antigua a la actual.
+    for stem in sorted(stems, key=int):
+        for indice in sorted(stems[stem]):
+            try:
+                textos.append(stems[stem][indice].read_text(
+                    encoding="utf-8", errors="replace"))
+            except OSError:
+                pass
+    return "\n".join(textos)
+
+
 def log_parts(log_path: Path, launched_at: float = 0.0):
     """Las partes del log en orden cronologico. La '.1.log' es ANTERIOR.
 
@@ -246,10 +281,9 @@ def main():
             log = newest_log(log_dir, launched_at)
             if log:
                 try:
-                    text = "\n".join(
-                        p.read_text(encoding="utf-8", errors="replace")
-                        for p in log_parts(log, launched_at)
-                    )
+                    # Todo el log de la corrida: la rotacion cambia de
+                    # stem, y la senal puede haber aparecido antes.
+                    text = run_text(log_dir, launched_at)
                 except OSError:
                     text = ""
                 # El juego es NO DETERMINISTA: la misma entrada de 16
@@ -291,8 +325,9 @@ def main():
     if not log:
         print("ERROR: no hay log de esta corrida")
         return 1
-    text = "\n".join(p.read_text(encoding="utf-8", errors="replace")
-                     for p in log_parts(log, launched_at))
+    # TODO el log de la corrida, no solo el ultimo stem: la rotacion
+    # cambia de stem a mitad de camino.
+    text = run_text(log_dir, launched_at)
     pipes = text.count("Creating graphics pipeline")
     fatal = text.count("invalid or unregistered")
     bik = text.count(args.senal)
