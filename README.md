@@ -537,6 +537,54 @@ tipo (vertex shaders `NEDEBENENE`, `NDNBN`, distintos de los de los
 menús): es el código de la ciudad, que solo se compila si el juego llega
 a la ciudad, y es la señal de que el gameplay se está ejecutando.
 
+#### El disparador por evento
+
+El formato nuevo es `w:<ruta>[:<timeout>][:<accion>]`:
+
+```bash
+MCLA_PAD_PRESS="5:w:/tmp/paso0:240:s:1:0@10"   # espera al fichero, luego stick
+```
+
+El gesto **espera a que ese fichero exista**, en vez de esperar al reloj.
+El timeout es opcional (240 s por defecto, `0` es esperar para siempre) y
+la acción por defecto es el botón A. Medido: el trigger dispara en
+cuanto aparece el fichero, y agota el timeout correctamente a los 8.01 s.
+
+`scripts/drive_with_trigger.py` monta esto: lanza el juego, vigila el log
+buscando la señal (`mc4.sav`, o la lectura del `.bik` de la intro, la
+que aparezca primero) y toca un fichero-señal **por gesto**, con la
+separación que se le pida. Cada gesto necesita su propio fichero: si
+todos esperasen al mismo, dispararían a la vez.
+
+```bash
+python3 scripts/drive_with_trigger.py --timeout 300
+python3 scripts/drive_with_trigger.py --sticks "0:s:1:0@10,15:s:0:-1@10"
+```
+
+Dos trampas del harness, que costaron una vuelta:
+
+- **`log_parts` recibía el nombre entero del log** en vez del stem, así
+  que buscaba `mcla_099.log.log` y leía un log vacío.
+- **Contar ficheros no vale** para saber si la corrida actual escribió:
+  el sink renombra el actual a `.1.log` al llegar a 5 MB, y si ese ya
+  existe lo renombra a `.2.log`, así que el número total no crece. Se
+  filtra por marca de tiempo.
+
+#### Y el juego no es determinista
+
+La misma entrada de 16 gestos, en los mismos segundos, creó el guardado
+a t+60 s en una corrida y **no lo creó** en otra. Los dos logs muestran
+los mismos 16 gestos en los mismos instantes. Así que ningún guion fijo
+es fiable, y por eso el trigger tiene que ser por evento.
+
+Lo que sí diferencia a las corridas es dónde se paran: una que llegó tuvo
+12 tandas de shaders con un pico de **128 pipelines en t+155 s** (la
+ciudad), y una que no llegó se quedó en 6 tandas y se detuvo en t+57 s.
+Los 16 gestos terminan en t+62 s, pero la ciudad carga en t+155 s: **el
+input se acaba antes de que el juego esté listo**.
+`scripts/find_entry_script.py` busca el guion de entrada que aguanta
+hasta ese momento.
+
 ## El XEX
 
 El launcher **rechaza** cualquier otro `default.xex`: el código recompilado y
