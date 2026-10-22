@@ -13,8 +13,15 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 >   tráfico animado.
 > - **PC, con pulsación:** el título **avanza**. El proyecto instala un mando
 >   de prueba en el input system del SDK (`src/mcla_scripted_pad.cpp`), así que
->   el PC envía botones como el móvil. Con tres pulsaciones el juego crea 421
->   pipelines frente a 280 del control, **sin un solo error fatal**.
+>   el PC envía botones como el móvil. Con 16 pulsaciones (A, START y D-pad en
+>   rotación) el juego **llega al free roam**: crea el guardado `mc4.sav`,
+>   que es la señal de que entró en una partida de verdad.
+> - **PC, conduciendo:** el mando de prueba mueve también el stick analógico,
+>   sostenido por tiempo. Con un **disparador por evento** —el gesto espera a
+>   un fichero-señal en vez de al reloj— el juego se conduce por la ciudad:
+>   los cinco sticks disparan a t+151, 160, 170, 180 y 190 s con magnitud
+>   completa, y el código de la ciudad se ejecuta **sin un solo crash de
+>   función no registrada**.
 > - **Android:** el juego **corre en el móvil** (Motorola Edge 50 Fusion,
 >   Android 16). Llega a la pantalla de título: 292 pipelines gráficos, 0
 >   errores fatales, 99.9% de fotogramas sin espera, audio sin silencios y el
@@ -22,14 +29,48 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 >   (`com.mcla.android` 0.1.0, arm64-v8a, 21.7 MB) con
 >   `scripts/port_android.sh`.
 >
-> **Lo que falta:** confirmar en el móvil que el título avanza al pulsar, con
-> el dispositivo sin uso en primer plano: con otra app delante, Android mata
-> el juego por memoria (1.3 GB) y no se puede probar. En el PC eso ya está
-> resuelto y comprobado (`scripts/test_pad_press.sh`), pero falta el mismo
-> gesto en el táctil real.
+> **Lo que falta:** confirmar en el móvil el gesto táctil real. En el PC ya
+> está resuelto y medido; en el móvil no se puede probar con otra app
+> delante, porque Android mata el juego por memoria (1.3 GB). Y falta
+> atacar los 633 huecos que quedan: **no son funciones sin registrar** (el
+> código de la ciudad no tiene ninguno), sino direcciones que el guest
+> llama y el codegen no cubre.
 >
 > Última dirección resuelta: `0x82554080`. Quedan declaradas 76 entradas a
 > mano en `mcla_analysis.toml`.
+
+## Arranque rápido (PC, sin móvil)
+
+El juego necesita un X server, y **sin `DISPLAY` muere en 0.03 s sin dejar
+log**: un fallo silencioso que hace que cualquier medición dé números
+idénticos. El driver de video `offscreen` de SDL evita eso, y todos los
+scripts de este repo lo usan.
+
+```bash
+# El juego, con un guion de pulsaciones
+MCLA_PAD_PRESS="3:0x1000,6:0x1000,9:0x0010" ./out/pc/mcla \
+  --game_data_root="$HOME/midnight-club-la" \
+  --user_data_root="$PWD/out/runtime/user" \
+  --cache_root="$PWD/out/runtime/cache" \
+  --metadata_root="$PWD/out/runtime/metadata" \
+  --log_level=info --headless=true --mnk_mode=true --user_language=1 \
+  --video_driver=offscreen
+
+# Conducirlo: sticks sostenidos cuando el juego llega a la ciudad
+python3 scripts/drive_with_trigger.py --timeout 480 --esperar-save --retardo 95
+
+# ¿Las pulsaciones hacen avanzar el juego? (A/B con control real)
+scripts/ab_test_press.sh
+
+# Cazar los huecos del gameplay
+python3 scripts/fix_gap_crashes.py --trigger --max-rondas 6
+```
+
+El guion de pulsaciones acepta botones (`<seg>:<máscara XInput>`), stick
+(`s:<lx>:<ly>`, con `@<seg>` para sostenerlo) y disparadores por evento
+(`w:<ruta>|<timeout>|<acción>`). La sección [6](#6-el-stick-analógico) y
+la [8](#8-conducir-el-stick-tiene-que-ir-después-de-la-intro) lo explican.
+
 
 ## Qué hay aquí
 
