@@ -37,9 +37,17 @@
 //   MCLA_PAD_PRESS="3:s:0:-1,6:0x1000"        # stick abajo, luego A
 //   MCLA_PAD_PRESS="3:s:0:-1:0:0"              # stick abajo
 //
+// A stick can be held for a given time with an "@<seconds>" suffix:
+//
+//   MCLA_PAD_PRESS="3:s:0:-1@6"               # stick abajo 6 segundos
+//
 // The stick signs are the XInput ones: x positive is right, y positive is
 // up. The SDK's deadzone is 7849, so a fraction above 0.25 is enough to
 // count as a deflection.
+//
+// The hold time matters because the game polls the pad about four times a
+// second: a hold measured in polls is barely a second, which is enough to
+// move a menu cursor and far too little to steer a car.
 //
 // The times are relative to the first poll, not to the start of the run:
 // the guest does not look at the pad until it reaches the title screen,
@@ -70,6 +78,14 @@ using rex::X_STATUS;
 // A gesture is either buttons (the XInput mask), a stick deflection, or
 // both. The axes are the XInput ones: x positive is right, y positive is
 // up, each from -1 to 1.
+//
+// hold_seconds is how long a stick deflection lasts. A button does not
+// need it: a button is an edge, and the guest sees it come up and go
+// down. A stick is a position, and the guest may need it held for a
+// while: the game polls the pad about four times a second, so a
+// six-poll hold is barely more than a second, which is enough to move a
+// menu cursor and far too little to steer a car. Zero means the default
+// (a handful of polls).
 struct Press {
   double at_seconds = 0.0;
   uint16_t buttons = 0;
@@ -77,6 +93,7 @@ struct Press {
   float ly = 0.0f;
   float rx = 0.0f;
   float ry = 0.0f;
+  double hold_seconds = 0.0;
 
   bool IsStick() const { return lx != 0.0f || ly != 0.0f || rx != 0.0f || ry != 0.0f; }
 };

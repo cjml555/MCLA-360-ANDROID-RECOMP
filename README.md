@@ -415,6 +415,7 @@ El guion también mueve los stick, con el prefijo `s:` y los ejes como
 ```bash
 MCLA_PAD_PRESS="3:s:0:-1,6:0x1000"      # stick abajo, luego A
 MCLA_PAD_PRESS="3:s:0:-1:0:0"            # stick abajo
+MCLA_PAD_PRESS="3:s:0:-1@6"             # stick abajo 6 segundos
 ```
 
 Los signos son los de XInput: x positivo es derecha, y positivo es arriba.
@@ -424,6 +425,13 @@ cuenta como deflection.
 A diferencia del botón, el stick no es un flanco sino una posición, y el
 guest puede necesitar verlo durante varios frames para mover un cursor.
 Por eso se mantiene **6 consultas** en vez de una.
+
+Y el tiempo de sostén se puede pedir con el sufijo `@<segundos>`, que
+manda sobre las consultas. Hace falta porque **el juego consulta el pad
+unas cuatro veces por segundo**: un sostén medido en consultas es apenas
+un segundo, suficiente para mover un cursor de menú y demasiado poco para
+girar una rueda. Con el sufijo el stick se mantiene el tiempo pedido
+(medido: 6 s pedidos → 3.03 s a 9.02 s, 4 s pedidos → 15.14 s a 19.10 s).
 
 ### 7. Lo que de verdad advance el juego
 

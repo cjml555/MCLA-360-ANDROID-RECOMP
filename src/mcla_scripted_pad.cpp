@@ -44,9 +44,28 @@ bool ParsePress(const std::string& text, Press* out) {
     return false;
   }
 
-  // A stick entry: "s:<lx>:<ly>" or "s:<lx>:<ly>:<rx>:<ry>".
+  // A stick entry: "s:<lx>:<ly>" or "s:<lx>:<ly>:<rx>:<ry>", optionally
+  // followed by "@<hold_seconds>" to say how long the deflection lasts.
   if (rest.rfind("s:", 0) == 0) {
-    const std::string axes = rest.substr(2);
+    std::string axes = rest.substr(2);
+    double hold = 0.0;
+    // The hold time is a suffix, separated by '@', so it cannot be
+    // confused with an axis: "s:0:-1@5" is the left stick down for five
+    // seconds, and "s:0:-1:0:0" is both sticks centred.
+    const size_t at_sign = axes.find('@');
+    if (at_sign != std::string::npos) {
+      const std::string hold_text = axes.substr(at_sign + 1);
+      axes = axes.substr(0, at_sign);
+      try {
+        size_t consumed = 0;
+        hold = std::stod(hold_text, &consumed);
+        if (consumed != hold_text.size() || hold < 0.0) {
+          return false;
+        }
+      } catch (...) {
+        return false;
+      }
+    }
     std::vector<std::string> parts;
     size_t begin = 0;
     while (begin <= axes.size()) {
@@ -78,6 +97,7 @@ bool ParsePress(const std::string& text, Press* out) {
     out->ly = values[1];
     out->rx = values[2];
     out->ry = values[3];
+    out->hold_seconds = hold;
     return true;
   }
 
@@ -191,7 +211,10 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
   //
   // A stick is held for kStickPolls polls instead of one: it is a
   // position, not an edge, and the guest may need to see it over several
-  // frames to move a cursor.
+  // frames to move a cursor. When the script asks for a hold time, that
+  // wins: the stick is held until the time is up. The game polls the pad
+  // about four times a second, so a poll-based hold is a second or so,
+  // and steering needs longer than that.
   uint16_t buttons = 0;
   int16_t lx = 0;
   int16_t ly = 0;
@@ -217,8 +240,25 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
           ry = to_axis(scheduled.press.ry);
         }
         break;
-      case PressState::kDown:
-        if (--scheduled.polls_left > 0) {
+      case PressState::kDown: {
+        // A hold time, when the script gives one, is what decides when
+        // the stick comes back. Otherwise the poll count does: the guest
+        // has to see the deflection over a few polls.
+        const bool hold_expired =
+            scheduled.press.hold_seconds > 0.0 &&
+            elapsed >= scheduled.press.at_seconds + scheduled.press.hold_seconds;
+        const bool polls_left = --scheduled.polls_left > 0;
+        if (hold_expired) {
+          // Time is up: release it.
+          scheduled.state = PressState::kUp;
+        } else if (scheduled.press.hold_seconds > 0.0) {
+          // Still within the hold time: keep the deflection.
+          buttons |= scheduled.buttons;
+          lx = to_axis(scheduled.press.lx);
+          ly = to_axis(scheduled.press.ly);
+          rx = to_axis(scheduled.press.rx);
+          ry = to_axis(scheduled.press.ry);
+        } else if (polls_left) {
           // Still holding the stick: keep the deflection.
           buttons |= scheduled.buttons;
           lx = to_axis(scheduled.press.lx);
@@ -230,6 +270,7 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
           scheduled.state = PressState::kUp;
         }
         break;
+      }
       case PressState::kUp:
         // The release was reported on the previous poll: done.
         scheduled.state = PressState::kDone;
@@ -241,6 +282,8 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
 
   if (buttons != last_buttons_ || lx != last_lx_ || ly != last_ly_ || rx != last_rx_ ||
       ry != last_ry_) {
+    const bool was_active = last_buttons_ != 0 || last_lx_ != 0 || last_ly_ != 0 ||
+                            last_rx_ != 0 || last_ry_ != 0;
     last_buttons_ = buttons;
     last_lx_ = lx;
     last_ly_ = ly;
@@ -250,6 +293,11 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
     if (buttons != 0 || lx != 0 || ly != 0 || rx != 0 || ry != 0) {
       REXLOG_INFO("mcla: scripted gamepad buttons=0x{:04X} stick=({},{},{},{}) at t={:.2f}s",
                   buttons, lx, ly, rx, ry, elapsed);
+    } else if (was_active) {
+      // The release. It has to be logged too: without it there is no way
+      // to tell a stick that was held for its full time from one that was
+      // cut short.
+      REXLOG_INFO("mcla: scripted gamepad released at t={:.2f}s", elapsed);
     }
   }
 
