@@ -42,6 +42,7 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 | `scripts/fix_gap_crashes.py` | Ciclo automático que resuelve los huecos de código sin dueño. |
 | `scripts/huecos.py` | Localiza los huecos midiendo el C++ generado (viene del SDK). |
 | `scripts/test_pad_press.sh` | Prueba la pulsación en el PC y reporta los errores fatales. |
+| `scripts/hunt_gaps_with_press.sh` | Cazando los huecos que solo se alcanzan al pulsar. |
 | `generated/rexglue.cmake` | Boilerplate del SDK (versionado). El resto de `generated/` se regenera y no se versiona. |
 
 ## El problema que resuelve este PoC
@@ -365,6 +366,40 @@ comparten aparece 15 s antes. Con tres pulsaciones seguidas el juego crea
 
 Esto además abre el hunting de huecos a los que solo se llega pulsando, que
 el ciclo automático no podía ver.
+
+### 5. Cazando los huecos que solo existen al pulsar
+
+El ciclo de `scripts/fix_gap_crashes.py` corre el juego sin tocar nada, así
+que nunca veía los huecos del código de input. Con el mando de prueba se
+cierran:
+
+```bash
+scripts/hunt_gaps_with_press.sh                     # 3 rondas con un guion largo
+scripts/fix_gap_crashes.py --pulsar "3:0x1000,7:0x1000"  # una ronda suelta
+```
+
+El guion son pares `<segundos>:<máscara XInput>`, y los segundos se cuentan
+desde que el guest empieza a mirar el pad. El script es largo y variado a
+propósito: **con 16 pulsaciones el juego llega a leer `xarchive_audlo.rpf`,
+un archivo que sin pulsaciones no lee nunca** (A/B: 0 lecturas en el
+control, 0.3 MB con pulsaciones). Cada pantalla nueva es código nuevo, y el
+código nuevo puede tener huecos.
+
+El ciclo también se corrigió por el camino, en dos cosas que lo hacían
+perder crashes:
+
+- **Los logs rotan.** El sink del SDK escribe en `mcla_NNN.log` y al llegar
+  a 5 MB renombra el actual a `mcla_NNN.1.log`, cuyo contenido es
+  **anterior**. El ciclo leía un solo archivo, el más reciente: un crash
+  temprano caía en la parte rotada y no se veía. Ahora lee todas las
+  partes, en orden cronológico.
+- **Una pulsación no es una ventana de tiempo, es una secuencia de
+  consultas.** Con una ventana fija de 200 ms, la pulsación se perdía
+  cuando el guest estaba ocupado (compilando shaders el polling se
+  ralentiza hasta arrastrarse, y la ventana entera cae entre dos
+  consultas). Con ocho pulsaciones programadas se entregaban cuatro. Ahora
+  la pulsación avanza de consulta en consulta —el botón baja, el guest lo
+  ve, el botón sube— así que no se pierde nunca: las ocho se entregan.
 
 ## El XEX
 

@@ -11,9 +11,22 @@ Ciclo:
   4. Repite hasta que no queden crashes de este tipo o no haya mas progreso.
 
 Escribe las declaraciones en mcla_analysis.toml y regenera el codegen.
+
+Con --pulsar, el juego recibe pulsaciones de boton (el mando de prueba de
+src/mcla_scripted_pad.cpp). Sin ellas el ciclo no alcanza los huecos que
+solo existen en el codigo de input: el 0x82554080, que colgaba al pulsar
+en el movil, es uno de ellos. El script de pulsaciones son pares
+"<segundos>:<mascara XInput>" separados por comas, y los segundos se
+cuentan desde que el guest empieza a mirar el pad.
+
+Los logs rotan: el sink del SDK escribe en `mcla_NNN.log` y al llegar a
+5 MB renombra el actual a `mcla_NNN.1.log`. El contenido de `.1` es
+ANTERIOR, asi que un crash temprano cae en la parte rotada: hay que
+leerlas todas, no solo la mas reciente.
 """
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -118,8 +131,49 @@ def regenerate(max_intentos=8):
     return False
 
 
-def launch():
-    """Ejecuta el juego en headless y devuelve (log_path, fatal_addr)."""
+LOG_ROTATED_RE = re.compile(r"^mcla_(\d+)\.log$")
+LOG_PART_RE = re.compile(r"^mcla_(\d+)(\.\d+)?\.log$")
+
+
+def log_parts(stem):
+    """Devuelve las partes de un log en orden cronologico.
+
+    El sink rotatorio del SDK (spdlog) escribe en `mcla_NNN.log` y, al
+    llegar a 5 MB, renombra el actual a `mcla_NNN.1.log` y abre uno
+    nuevo. El contenido de `.1` es ANTERIOR al de `.log`, asi que un
+    crash temprano cae en la parte rotada.
+
+    Leer solo un archivo (el mas reciente) pierde los crashes de las
+    primeras vueltas de una ronda larga: es exactamente lo que pasa
+    cuando el juego tarda en arrancar y el crash ocurre antes de que
+    roten los logs.
+    """
+    log_dir = ROOT / "out/pc/logs"
+    parts = []
+    for path in log_dir.glob("mcla_*.log"):
+        m = LOG_PART_RE.match(path.name)
+        if not m or m.group(1) != stem:
+            continue
+        # Sin sufijo = 0 (la mas nueva), .1 = 1, .2 = 2...
+        index = int(m.group(2)[1:]) if m.group(2) else 0
+        parts.append((index, path))
+    parts.sort(key=lambda x: -x[0])  # mas antigua primero
+    return [path for _, path in parts]
+
+
+def read_log(stem):
+    """Concatena todas las partes de un log en orden cronologico."""
+    return "\n".join(p.read_text(errors="replace") for p in log_parts(stem))
+
+
+def launch(press_script=None, timeout=90):
+    """Ejecuta el juego en headless y devuelve (log_stem, fatal_addr).
+
+    Con press_script, el juego recibe pulsaciones de boton (ver
+    scripts/test_pad_press.sh): es la unica forma de alcanzar los huecos
+    que solo existen en el codigo de input, que el ciclo automatico no
+    podia ver porque no pulsaba nada.
+    """
     logs = sorted((ROOT / "out/pc/logs").glob("mcla_*.log"))
     before = {p for p in logs}
     cmd = ["./out/pc/mcla",
@@ -129,17 +183,26 @@ def launch():
            f"--metadata_root={ROOT}/out/runtime/metadata",
            "--log_level=info", "--headless=true", "--mnk_mode=true",
            "--user_language=1", "--async_shader_compilation=false"]
+    env = dict(os.environ)
+    if press_script:
+        env["MCLA_PAD_PRESS"] = press_script
     try:
-        run(cmd, cwd=ROOT, timeout=60)
+        subprocess.run(cmd, cwd=ROOT, timeout=timeout, env=env,
+                       capture_output=True, text=True)
     except subprocess.TimeoutExpired:
         pass  # sigue vivo: es una buena señal
     new = [p for p in (ROOT / "out/pc/logs").glob("mcla_*.log") if p not in before]
     if not new:
         return None, None
-    log = max(new, key=lambda p: p.stat().st_mtime)
-    text = log.read_text(errors="replace")
+    # El stem es el numero de la corrida; las partes rotadas comparten stem.
+    stems = {LOG_PART_RE.match(p.name).group(1) for p in new
+             if LOG_PART_RE.match(p.name)}
+    if not stems:
+        return None, None
+    stem = max(stems, key=lambda s: int(s))
+    text = read_log(stem)
     m = FATAL_RE.search(text)
-    return log, (int(m.group(1), 16) if m else None)
+    return stem, (int(m.group(1), 16) if m else None)
 
 
 def declare(addresses):
@@ -162,6 +225,12 @@ def main():
     ap.add_argument("--max-rondas", type=int, default=25)
     ap.add_argument("--no-codegen", action="store_true",
                     help="solo análisis, no regenerar")
+    ap.add_argument("--pulsar", default=None,
+                    help="script de pulsaciones para el juego, "
+                         "p.ej. '2:0x1000,8:0x1000'. Sin esto, el ciclo no "
+                         "alcanza los huecos que solo existen al pulsar")
+    ap.add_argument("--timeout", type=int, default=90,
+                    help="segundos de cada ejecucion")
     args = ap.parse_args()
 
     # El target `mcla` depende del codegen, asi que el build dispara el
@@ -176,11 +245,11 @@ def main():
         print(f"\n=== ronda {ronda} ===", flush=True)
         limpiar_shm()
         rebuild()
-        log, addr = launch()
+        stem, addr = launch(press_script=args.pulsar, timeout=args.timeout)
         if addr is None:
-            print(f"  log: {log}", flush=True)
-            if log:
-                print(log.read_text(errors='replace')[-2500:])
+            print(f"  log: mcla_{stem}.log", flush=True)
+            if stem:
+                print(read_log(stem)[-2500:])
             print("  sin crash de funcion no registrada", flush=True)
             return
         print(f"  crash en 0x{addr:08X}", flush=True)
@@ -193,8 +262,8 @@ def main():
         gap = next((s for s, size in gs.items() if s <= addr < s + size), None)
         if gap is None:
             print(f"  0x{addr:08X} no cae en ningun hueco conocido", flush=True)
-            if log:
-                print(log.read_text(errors='replace')[-2000:])
+            if stem:
+                print(read_log(stem)[-2000:])
             return
         size = gs[gap]
         print(f"  hueco de {size} bytes en 0x{gap:08X}", flush=True)

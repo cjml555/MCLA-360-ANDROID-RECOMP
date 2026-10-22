@@ -72,6 +72,12 @@ std::vector<Press> ReadPressScript();
 // A gamepad that presses buttons on a timer. The guest polls it through
 // the SDK's normal input path, so whatever it does with a button press on
 // the phone it does here too.
+//
+// A press is delivered by POLL, not by a stopwatch: the script says "at
+// second N" and the press is held from then on, until the guest has seen
+// it come up and go down again. A fixed-length window would drop presses
+// whenever the guest was busy (compiling shaders slows the polling down
+// to a crawl, and a 200 ms window can fall entirely between two polls).
 class ScriptedGamepadDriver final : public rex::input::InputDriver {
  public:
   explicit ScriptedGamepadDriver(std::vector<Press> presses);
@@ -89,7 +95,26 @@ class ScriptedGamepadDriver final : public rex::input::InputDriver {
                                rex::input::X_INPUT_KEYSTROKE* out_keystroke) override;
 
  private:
-  std::vector<Press> presses_;
+  // The state of one scheduled press.
+  //
+  // A press is not a window of time: it is a sequence of polls. The guest
+  // sees the button go down, then up, and that pair is what it acts on. So
+  // the press waits for the polls to happen instead of hoping the guest
+  // happens to look at the pad during a fixed window.
+  enum class PressState {
+    kPending,   // not due yet
+    kDown,      // due: the button goes down and stays down
+    kUp,        // the guest has seen it down: release it
+    kDone,      // released and delivered
+  };
+
+  struct Scheduled {
+    Press press;
+    PressState state = PressState::kPending;
+    uint16_t buttons = 0;  // the buttons this press holds down
+  };
+
+  std::vector<Scheduled> schedule_;
   // The clock starts at the first poll, not at construction: the guest does
   // not ask for the pad until it reaches the title screen, which is half a
   // minute into the run. A clock that started at construction would fire

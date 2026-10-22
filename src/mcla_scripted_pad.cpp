@@ -21,9 +21,6 @@ namespace {
 // (the keyboard one uses 0x4D4E4B00), so this cannot collide.
 constexpr rex::input::DeviceId kScriptedDevice = static_cast<rex::input::DeviceId>(0x53435250);
 
-// How long the button stays down.
-constexpr double kHoldSeconds = 0.2;
-
 // Parses one "<seconds>:<mask>" entry. The mask is hexadecimal, with or
 // without the 0x prefix. Returns false on anything malformed.
 bool ParsePress(const std::string& text, Press* out) {
@@ -93,7 +90,14 @@ std::vector<Press> ReadPressScript() {
 }
 
 ScriptedGamepadDriver::ScriptedGamepadDriver(std::vector<Press> presses)
-    : InputDriver(nullptr, 0), presses_(std::move(presses)) {}
+    : InputDriver(nullptr, 0) {
+  schedule_.reserve(presses.size());
+  for (const Press& press : presses) {
+    Scheduled scheduled;
+    scheduled.press = press;
+    schedule_.push_back(scheduled);
+  }
+}
 
 ScriptedGamepadDriver::~ScriptedGamepadDriver() = default;
 
@@ -129,10 +133,31 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
   const double elapsed =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
 
+  // Each press advances by ONE poll, not by the clock: the guest has to
+  // see the button go down and then go up again, and the only thing that
+  // can guarantee that is a poll. A press that is due stays down until the
+  // next poll releases it, so a slow polling rate delays the release but
+  // never loses the press.
   uint16_t buttons = 0;
-  for (const Press& press : presses_) {
-    if (elapsed >= press.at_seconds && elapsed < press.at_seconds + kHoldSeconds) {
-      buttons |= press.buttons;
+  for (Scheduled& scheduled : schedule_) {
+    switch (scheduled.state) {
+      case PressState::kPending:
+        if (elapsed >= scheduled.press.at_seconds) {
+          scheduled.state = PressState::kDown;
+          scheduled.buttons = scheduled.press.buttons;
+          buttons |= scheduled.buttons;
+        }
+        break;
+      case PressState::kDown:
+        // The guest has seen it down on the previous poll: release it now.
+        scheduled.state = PressState::kUp;
+        break;
+      case PressState::kUp:
+        // The release was reported on the previous poll: done.
+        scheduled.state = PressState::kDone;
+        break;
+      case PressState::kDone:
+        break;
     }
   }
 
