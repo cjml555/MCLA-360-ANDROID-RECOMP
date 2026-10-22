@@ -378,19 +378,29 @@ cierran:
 ```bash
 scripts/hunt_gaps_with_press.sh                     # 3 rondas con un guion largo
 scripts/fix_gap_crashes.py --pulsar "3:0x1000,7:0x1000"  # una ronda suelta
+scripts/fix_gap_crashes.py --trigger                # caza el codigo de la ciudad
 ```
 
 El guion son pares `<segundos>:<máscara XInput>`, y los segundos se cuentan
 desde que el guest empieza a mirar el pad. El script es largo y variado a
-propósito: **con 16 pulsaciones el juego llega a leer `xarchive_audlo.rpf`,
-un archivo que sin pulsaciones no lee nunca** (A/B: 0 lecturas en el
-control, 0.3 MB con pulsaciones). Cada pantalla nueva es código nuevo, y el
-código nuevo puede tener huecos.
+propósito: **con 16 pulsaciones el juego llega a leer `xarchive_audlo.rpf`**
+(A/B: 0 lecturas en el control, 0.3 MB con pulsaciones). Cada pantalla
+nueva es código nuevo, y el código nuevo puede tener huecos.
 
 Aviso: esa comparación de `xarchive_audlo.rpf` se hizo con el A/B
 defectuoso del que se habla en la sección 7, así que **no es una prueba
 válida**. La medida buena es la de la sección 7, con el control que
 instala el pad pero no pulsa.
+
+**`--trigger` es la forma de cazar los huecos del gameplay.** Con un
+guion de reloj no se llega: el juego no llega a la ciudad siempre, y
+cuando llega lo hace a un momento distinto en cada corrida. `--trigger`
+usa el harness de conducción — la entrada de 16 gestos y luego sticks
+sostenidos que salen cuando el juego ha llegado — y así el hunting sí ve
+el código de la ciudad.
+
+Como el juego solo llega ~40 % de las veces, hacen falta varias rondas:
+`--max-rondas 6`.
 
 El ciclo también se corrigió por el camino, en dos cosas que lo hacían
 perder crashes:
