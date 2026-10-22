@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path("/home/jhon/MCLA-360-ANDROID-RECOMP")
@@ -174,8 +175,12 @@ def launch(press_script=None, timeout=90):
     que solo existen en el codigo de input, que el ciclo automatico no
     podia ver porque no pulsaba nada.
     """
-    logs = sorted((ROOT / "out/pc/logs").glob("mcla_*.log"))
-    before = {p for p in logs}
+    # La marca de tiempo de ahora: solo valen los logs escritos a partir
+    # de aqui. No se puede contar ficheros: el sink del SDK renombra el
+    # log actual a .1.log al llegar a 5 MB, y si ese .1.log ya existe lo
+    # renombra a .2.log, asi que el numero total no crece y la prueba de
+    # "hay un log nuevo" no vale.
+    launched = time.time()
     cmd = ["./out/pc/mcla",
            f"--game_data_root={GAME_ROOT}",
            f"--user_data_root={ROOT}/out/runtime/user",
@@ -196,12 +201,55 @@ def launch(press_script=None, timeout=90):
                        capture_output=True, text=True)
     except subprocess.TimeoutExpired:
         pass  # sigue vivo: es una buena señal
-    new = [p for p in (ROOT / "out/pc/logs").glob("mcla_*.log") if p not in before]
-    if not new:
+    stems = set()
+    for p in (ROOT / "out/pc/logs").glob("mcla_*.log"):
+        m = LOG_PART_RE.match(p.name)
+        if not m:
+            continue
+        if p.stat().st_mtime > launched:
+            stems.add(m.group(1))
+    if not stems:
         return None, None
-    # El stem es el numero de la corrida; las partes rotadas comparten stem.
-    stems = {LOG_PART_RE.match(p.name).group(1) for p in new
-             if LOG_PART_RE.match(p.name)}
+    stem = max(stems, key=lambda s: int(s))
+    text = read_log(stem)
+    m = FATAL_RE.search(text)
+    return stem, (int(m.group(1), 16) if m else None)
+
+
+def launch_trigger(timeout=300):
+    """Ejecuta el juego conduciendolo con disparadores por evento.
+
+    Devuelve (log_stem, fatal_addr), como launch(), pero el guion es el
+    del harness: la entrada de 16 gestos y luego sticks sostenidos que
+    salen cuando el juego ha llegado a la ciudad.
+
+    Es distinto de un guion de reloj porque el juego no llega a la
+    ciudad siempre, y cuando llega lo hace a un momento distinto en
+    cada corrida: un stick en un segundo fijo cae unas veces dentro de
+    la cinematica de intro (que ignora el input) y otras despues. El
+    disparador espera al fichero-señal, que el harness toca cuando ve
+    en el log que el juego ha llegado.
+    """
+    cmd = [sys.executable, str(ROOT / "scripts/drive_with_trigger.py"),
+           "--timeout", str(timeout),
+           "--esperar-save",
+           "--senal", "mc4.sav",
+           "--senal-alt", "intro720.bik",
+           "--retardo", "95"]
+    try:
+        subprocess.run(cmd, cwd=ROOT, timeout=timeout + 120,
+                       capture_output=True, text=True)
+    except subprocess.TimeoutExpired:
+        pass
+
+    # El harness deja el log de la corrida con su numero. Se cogen los
+    # stems modificados hace poco.
+    ahora = time.time()
+    stems = set()
+    for p in (ROOT / "out/pc/logs").glob("mcla_*.log"):
+        m = LOG_PART_RE.match(p.name)
+        if m and p.stat().st_mtime > ahora - (timeout + 300):
+            stems.add(m.group(1))
     if not stems:
         return None, None
     stem = max(stems, key=lambda s: int(s))
@@ -234,6 +282,14 @@ def main():
                     help="script de pulsaciones para el juego, "
                          "p.ej. '2:0x1000,8:0x1000'. Sin esto, el ciclo no "
                          "alcanza los huecos que solo existen al pulsar")
+    ap.add_argument("--trigger", action="store_true",
+                    help="usar la conduccion con disparadores por evento: la "
+                         "entrada de 16 gestos, y despues sticks sostenidos "
+                         "cuando el juego ha llegado a la ciudad. Es la "
+                         "forma de cazar los huecos del codigo de gameplay, "
+                         "que el guion de reloj no alcanza: el juego no "
+                         "llega a la ciudad siempre, y cuando llega lo hace "
+                         "a un momento distinto en cada corrida")
     ap.add_argument("--timeout", type=int, default=90,
                     help="segundos de cada ejecucion")
     args = ap.parse_args()
@@ -250,7 +306,10 @@ def main():
         print(f"\n=== ronda {ronda} ===", flush=True)
         limpiar_shm()
         rebuild()
-        stem, addr = launch(press_script=args.pulsar, timeout=args.timeout)
+        if args.trigger:
+            stem, addr = launch_trigger(timeout=max(args.timeout, 300))
+        else:
+            stem, addr = launch(press_script=args.pulsar, timeout=args.timeout)
         if addr is None:
             print(f"  log: mcla_{stem}.log", flush=True)
             if stem:
