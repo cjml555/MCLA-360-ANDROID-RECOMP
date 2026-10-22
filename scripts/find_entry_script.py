@@ -26,6 +26,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GAME_ROOT = Path(os.environ.get("MCLA_GAME_ROOT", Path.home() / "midnight-club-la"))
 LOG_DIR = ROOT / "out/pc/logs"
+# Cada resultado se anota aqui en cuanto se mide, para que la muerte
+# del proceso no tire el trabajo hecho.
+RESULTADOS = Path("/home/jhon/.hermes/cache/scratch/entry_results.tsv")
 
 # Los botones que se usan: A, START y el D-pad.
 A, START, DPAD = "0x1000", "0x0010", "0x0008"
@@ -61,7 +64,6 @@ def correr(nombre, guion, timeout=300):
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         pass
-
     logs = [p for p in LOG_DIR.glob("mcla_*.log")
             if not re.search(r"\.\d+\.log$", p.name)
             and p.stat().st_mtime > launched]
@@ -95,6 +97,11 @@ def correr(nombre, guion, timeout=300):
                 t_save = f"t+{int(d)}s"
     print(f"  {nombre:38s} pipes={pipes:4d} save={'SI' if save else 'no':3s} "
           f"({t_save:8s}) intro={bik}")
+    # El resultado se escribe a disco al instante: una corrida de este
+    # script tarda cinco minutos y el proceso se puede morir, y lo que
+    # ya se midio no se pierde.
+    with RESULTADOS.open("a", encoding="utf-8") as f:
+        f.write(f"{nombre}\t{pipes}\t{'SI' if save else 'no'}\t{t_save}\t{bik}\n")
     return {"pipes": pipes, "save": save, "bik": bik}
 
 
@@ -106,7 +113,7 @@ def main():
     # Los candidatos: la entrada original (16 gestos, hasta t+48) y
     # variantes que llegan mas lejos.
     base16 = [f"{3+i*3}:{A}" for i in range(16)]
-    candidatos = {
+    todos = {
         "16 gestos, hasta t+48 (el de antes)": ",".join(base16),
         "24 gestos, hasta t+72": ",".join(f"{3+i*3}:{A}" for i in range(24)),
         "24 gestos, hasta t+90 (cada 4s)": ",".join(f"{3+i*4}:{A}" for i in range(24)),
@@ -117,8 +124,21 @@ def main():
             f"{3+i*4}:{A},{5+i*4}:{DPAD}" for i in range(20)),
     }
 
+    # Si se pasa un indice, solo se prueba ese: las corridas duran cinco
+    # minutos cada una y hay veces que el proceso se muere.
+    if len(sys.argv) > 1:
+        try:
+            indice = int(sys.argv[1])
+        except ValueError:
+            print("uso: find_entry_script.py [indice-del-candidato]")
+            return 1
+        nombre, guion = list(todos.items())[indice]
+        print(f"==> probando solo: {nombre}")
+        correr(nombre, guion)
+        return 0
+
     print("==> buscando el guion de entrada que llega al free roam")
-    for nombre, guion in candidatos.items():
+    for nombre, guion in todos.items():
         correr(nombre, guion)
 
     print()

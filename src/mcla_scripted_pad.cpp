@@ -45,52 +45,45 @@ bool ParsePress(const std::string& text, Press* out) {
     return false;
   }
 
-  // A file trigger: "w:<path>[:<timeout>][:<action>]". The gesture waits
-  // for the file to exist instead of waiting for the clock. The action
-  // is optional and defaults to a button A, because the common case is
-  // "when the game gets to this point, press this".
+  // A file trigger: "w:<path>|<timeout>|<action>". The parts are
+  // separated by '|' and not by ':' because both the path and the
+  // action contain colons: the path is a file name and the action can
+  // be a stick ("s:1:0:0:0"). With colons there is no way to tell
+  // where one ends and the next begins.
   if (rest.rfind("w:", 0) == 0) {
-    std::string body = rest.substr(2);
-    // The action is the last colon-separated field, if it looks like
-    // one. It has to say what it is: "s:" for a stick, "0x" for a button
-    // mask. A bare number is the timeout, not a mask, because a mask
-    // without the "0x" is indistinguishable from one.
-    std::string path = body;
-    std::string action;
-    const size_t last_colon = body.rfind(':');
-    if (last_colon != std::string::npos && last_colon > 0) {
-      const std::string tail = body.substr(last_colon + 1);
-      const bool looks_like_action = tail.rfind("s:", 0) == 0 || tail.rfind("0x", 0) == 0;
-      if (looks_like_action) {
-        path = body.substr(0, last_colon);
-        action = tail;
+    const std::string body = rest.substr(2);
+    std::vector<std::string> parts;
+    size_t begin = 0;
+    while (begin <= body.size()) {
+      const size_t sep = body.find('|', begin);
+      parts.push_back(body.substr(begin, sep == std::string::npos ? std::string::npos : sep - begin));
+      if (sep == std::string::npos) {
+        break;
       }
+      begin = sep + 1;
     }
-    double timeout = 0.0;
-    // The timeout sits between the path and the action: "w:<path>:<t>".
-    const size_t timeout_colon = path.rfind(':');
-    if (timeout_colon != std::string::npos && timeout_colon > 0) {
-      const std::string timeout_text = path.substr(timeout_colon + 1);
-      try {
-        size_t consumed = 0;
-        const double value = std::stod(timeout_text, &consumed);
-        if (consumed == timeout_text.size() && value >= 0.0) {
-          timeout = value;
-          path = path.substr(0, timeout_colon);
-        }
-      } catch (...) {
-        // Not a number: the colon belongs to the path. Keep it.
-      }
-    }
-    if (path.empty()) {
+    if (parts.empty() || parts[0].empty()) {
       return false;
     }
     out->at_seconds = at;
-    out->wait_for_file = path;
-    out->wait_timeout_seconds = timeout;
-    if (!action.empty()) {
+    out->wait_for_file = parts[0];
+    if (parts.size() > 1 && !parts[1].empty()) {
+      try {
+        size_t consumed = 0;
+        const double value = std::stod(parts[1], &consumed);
+        if (consumed != parts[1].size() || value < 0.0) {
+          return false;
+        }
+        out->wait_timeout_seconds = value;
+      } catch (...) {
+        return false;
+      }
+    }
+    if (parts.size() > 2 && !parts[2].empty()) {
+      // The action is itself an entry, so it is parsed with the same
+      // code. Its time is zero: what matters is the action.
       Press accion;
-      if (!ParsePress("0:" + action, &accion)) {
+      if (!ParsePress("0:" + parts[2], &accion)) {
         return false;
       }
       out->buttons = accion.buttons;

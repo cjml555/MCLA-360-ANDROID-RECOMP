@@ -32,20 +32,34 @@ GAME_ROOT = Path(os.environ.get("MCLA_GAME_ROOT", Path.home() / "midnight-club-l
 TRIGGER_DIR = Path(os.environ.get("MCLA_TRIGGER_DIR", "/tmp/mcla-triggers"))
 
 # La entrada por los menus, que llega al free roam.
-ENTRADA = ",".join([
-    "3:0x1000", "6:0x1000", "9:0x0010", "12:0x1000", "15:0x0008", "18:0x1000",
-    "21:0x0010", "24:0x1000", "27:0x0001", "30:0x1000", "33:0x0010", "36:0x1000",
-    "39:0x0008", "42:0x1000", "45:0x0010", "48:0x1000",
-])
+#
+# La mezcla importa mas que la cantidad. Con 16 gestos (A, START y D-pad
+# en rotacion) el juego llega y crea el guardado; con 32 gestos de A
+# PURO no llega nunca (medido: 6 corridas con A puro, 0 con guardado;
+# 2 de 5 con la mezcla, con guardado). Pulsar A sin mas es pasarse de
+# opcion: el D-pad y el START son los que mueven los menus.
+#
+# Y la entrada tiene que durar: la ciudad carga en t+155s y una entrada
+# que acaba en t+62s se queda corta. Por eso el patron de 16 se repite
+# hasta t+140, cubriendo la carga.
+PATRON = ["0x1000", "0x1000", "0x0010", "0x1000", "0x0008",
+          "0x1000", "0x0010", "0x1000", "0x0001", "0x1000",
+          "0x0010", "0x1000", "0x0008", "0x1000", "0x0010", "0x1000"]
+ENTRADA = ",".join(f"{3+i*3}:{PATRON[i % len(PATRON)]}" for i in range(48))
 
 
-def log_parts(log_path: Path):
+def log_parts(log_path: Path, launched_at: float = 0.0):
     """Las partes del log en orden cronologico. La '.1.log' es ANTERIOR.
 
     Ojo: se pasa el PATH del log, no su nombre: las partes se buscan
     como "<nombre sin .log>.log", "<nombre sin .log>.1.log", etc. Si se
     pasa el nombre entero, se buscaria "mcla_099.log.log", que no existe,
     y el log saldria vacio.
+
+    Y con launched_at se descartan las partes anteriores a la corrida:
+    un .1.log puede ser de una corrida vieja, con un mc4.sav dentro, y
+    el harness lo leeria como si la senal acabara de aparecer. Eso
+    hacia que la senal saltase a t+1.7s.
     """
     stem = log_path.name
     if stem.endswith(".log"):
@@ -53,7 +67,7 @@ def log_parts(log_path: Path):
     ordered = []
     for suffix in (".log", ".1.log", ".2.log", ".3.log"):
         p = log_path.parent / f"{stem}{suffix}"
-        if p.exists():
+        if p.exists() and p.stat().st_mtime > launched_at:
             ordered.append(p)
     return ordered
 
@@ -122,9 +136,18 @@ def main():
                     help="texto que, al aparecer en el log, dispara el primer stick")
     ap.add_argument("--senal-alt", default="intro720.bik",
                     help="segunda senal que tambien dispara (separada por comas)")
+    ap.add_argument("--esperar-save", action="store_true",
+                    help="esperar a que aparezca el mc4.sav y NO disparar todavia: "
+                         "el save se escribe al entrar, pero la ciudad carga "
+                         "despues, y el stick hay que darlo cuando la ciudad "
+                         "esta, no cuando se entra")
     ap.add_argument("--sticks",
                     default="5:s:1:0@10,15:s:0:-1@10,25:s:-1:0@10,35:s:0:1@10,45:s:0.5:-0.5@10",
                     help='gestos: "<seg tras la senal>:<lx>:<ly>[:<rx>:<ry>][@<seg>]"')
+    ap.add_argument("--retardo", type=float, default=90.0,
+                    help="con --esperar-save, segundos tras la senal antes del "
+                         "primer stick (la ciudad carga en t+155s y el save "
+                         "se escribe en t+60s: unos 90s de diferencia)")
     ap.add_argument("--sin-entrada", action="store_true",
                     help="no hacer la entrada por los menus")
     args = ap.parse_args()
@@ -149,11 +172,19 @@ def main():
         fichero = TRIGGER_DIR / f"paso{i}"
         senales.append((momento, fichero, accion))
         # El timeout de espera es generoso: el juego puede tardar mas de
-        # lo que se espera en llegar al punto de la senal.
-        accion_con_trigger = f"w:{fichero}:240:{accion}"
+        # lo que se espera en llegar al punto de la senal, y con
+        # --esperar-save el retardo se suma ahi.
+        # Las partes se separan con '|': la ruta y la accion tienen
+        # dos puntos, asi que con ':' no se podria saber donde acaba
+        # una y empieza la otra.
+        accion_con_trigger = f"w:{fichero}|600|{accion}"
 
+    # OJO: lo que va al guion es accion_con_trigger, no la accion suelta.
+    # La accion suelta no lleva prefijo de tiempo, asi que el parser la
+    # rechaza y el gesto no se programa nunca.
     guion = ",".join(
-        ([ENTRADA] if not args.sin_entrada else []) + [a for _, _, a in senales]
+        ([ENTRADA] if not args.sin_entrada else []) +
+        [f"w:{f}|600|{a}" for _, f, a in senales]
     )
 
     env = dict(os.environ)
@@ -207,7 +238,7 @@ def main():
                 try:
                     text = "\n".join(
                         p.read_text(encoding="utf-8", errors="replace")
-                        for p in log_parts(log)
+                        for p in log_parts(log, launched_at)
                     )
                 except OSError:
                     text = ""
@@ -222,9 +253,18 @@ def main():
                     senal_vista = ahora
                     senal_nombre = vista
                     print(f"==> senal '{vista}' vista en t+{senal_vista:.1f}s")
+                    if args.esperar_save:
+                        # El save se escribe al ENTRAR, pero la ciudad
+                        # carga despues (t+155s). El stick hay que darlo
+                        # con la ciudad ya dentro, asi que la senal solo
+                        # marca el momento: los sticks esperan su turno.
+                        print("    (esperando: la ciudad carga despues del save)")
             if senal_vista is not None and proximo < len(senales):
+                # Con --esperar-save, los sticks no salen hasta pasado
+                # el retardo, que es cuando la ciudad ya esta.
+                espera = args.retardo if args.esperar_save else 0.0
                 momento, fichero, _ = senales[proximo]
-                if ahora - senal_vista >= momento:
+                if ahora - senal_vista >= momento + espera:
                     fichero.touch()
                     print(f"==> t+{ahora - senal_vista:.1f}s tras la senal: disparo {proximo}")
                     proximo += 1
@@ -242,7 +282,7 @@ def main():
         print("ERROR: no hay log de esta corrida")
         return 1
     text = "\n".join(p.read_text(encoding="utf-8", errors="replace")
-                     for p in log_parts(log))
+                     for p in log_parts(log, launched_at))
     pipes = text.count("Creating graphics pipeline")
     fatal = text.count("invalid or unregistered")
     bik = text.count(args.senal)
