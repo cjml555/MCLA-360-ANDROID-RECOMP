@@ -44,6 +44,7 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 | `scripts/test_pad_press.sh` | Prueba la pulsación en el PC y reporta los errores fatales. |
 | `scripts/hunt_gaps_with_press.sh` | Cazando los huecos que solo se alcanzan al pulsar. |
 | `scripts/ab_test_press.sh` | A/B: ¿las pulsaciones hacen avanzar el juego? |
+| `scripts/drive_with_trigger.py` | Conduce el juego con disparadores por evento. |
 | `generated/rexglue.cmake` | Boilerplate del SDK (versionado). El resto de `generated/` se regenera y no se versiona. |
 
 ## El problema que resuelve este PoC
@@ -539,16 +540,20 @@ a la ciudad, y es la señal de que el gameplay se está ejecutando.
 
 #### El disparador por evento
 
-El formato nuevo es `w:<ruta>[:<timeout>][:<accion>]`:
+El formato es `w:<ruta>|<timeout>|<accion>`:
 
 ```bash
-MCLA_PAD_PRESS="5:w:/tmp/paso0:240:s:1:0@10"   # espera al fichero, luego stick
+MCLA_PAD_PRESS="w:/tmp/paso0|600|s:1:0:0:0@10"
 ```
 
-El gesto **espera a que ese fichero exista**, en vez de esperar al reloj.
-El timeout es opcional (240 s por defecto, `0` es esperar para siempre) y
-la acción por defecto es el botón A. Medido: el trigger dispara en
-cuanto aparece el fichero, y agota el timeout correctamente a los 8.01 s.
+El `w:` va **al principio** de la entrada, sin tiempo delante: es un
+disparador, no un momento. Las partes se separan con `|` porque tanto la
+ruta como la acción tienen dos puntos (`s:1:0:0:0`), y con `:` no hay
+forma de saber dónde acaba una y empieza la otra.
+
+El gesto **espera a que ese fichero exista**, con un timeout (600 s por
+defecto, `0` es esperar para siempre) y la acción opcional (por defecto
+el botón A).
 
 `scripts/drive_with_trigger.py` monta esto: lanza el juego, vigila el log
 buscando la señal (`mc4.sav`, o la lectura del `.bik` de la intro, la
@@ -557,11 +562,21 @@ separación que se le pida. Cada gesto necesita su propio fichero: si
 todos esperasen al mismo, dispararían a la vez.
 
 ```bash
-python3 scripts/drive_with_trigger.py --timeout 300
-python3 scripts/drive_with_trigger.py --sticks "0:s:1:0@10,15:s:0:-1@10"
+python3 scripts/drive_with_trigger.py --timeout 480 --esperar-save --retardo 95
 ```
 
-Dos trampas del harness, que costaron una vuelta:
+**Medido de punta a punta:** los cinco triggers dispararon a t+151,
+160, 170, 180 y 190 s — con 10 s de separación exacta, independiente del
+ritmo del juego — y el stick llegó con magnitud completa (32767 en las
+cuatro direcciones). La tanda grande de shaders (142 pipelines) cae en
+t+154 s, justo cuando empieza el stick: **el gameplay se ejecuta con la
+ciudad ya cargada**, que es justo lo que no se lograba con el reloj.
+
+El harness usa `--esperar-save` porque el guardado se escribe al
+*entrar* (t+60 s) pero la ciudad carga después (t+155 s): el stick hay
+que darlo con la ciudad dentro, no al entrar.
+
+Tres trampas del harness, que costaron una vuelta cada una:
 
 - **`log_parts` recibía el nombre entero del log** en vez del stem, así
   que buscaba `mcla_099.log.log` y leía un log vacío.
@@ -569,6 +584,26 @@ Dos trampas del harness, que costaron una vuelta:
   el sink renombra el actual a `.1.log` al llegar a 5 MB, y si ese ya
   existe lo renombra a `.2.log`, así que el número total no crece. Se
   filtra por marca de tiempo.
+- **Las partes rotadas de una corrida vieja** tienen dentro un
+  `mc4.sav` de antes, y el harness lo leía como si la señal acabara de
+  aparecer: la señal saltaba a t+1.7 s.
+
+#### La entrada: exactamente 16 gestos, con mezcla
+
+Qué entrada llega al free roam, medido:
+
+- 16 gestos (A, START y D-pad en rotación) → **llega**, 2 de 5 corridas
+- 16 + cola de mantenimiento de 12 → no llega, 0 de 2
+- 32 gestos de A puro → no llega nunca, 0 de 6
+- 48 gestos de la mezcla repetida → no llega, 0 de 2
+
+Dos cosas, y las dos importan:
+
+- **La mezcla importa más que la cantidad.** Pulsar A sin más es pasarse
+  de opción: el D-pad y el START son los que mueven los menús.
+- **Añadir más gestos después también rompe.** El guardado se escribe en
+  t+60 s, justo cuando el último gesto de los 16 hace su efecto (t+48 s).
+  Seguir pulsando deja al juego en un menú que ya no avanza.
 
 #### Y el juego no es determinista
 
@@ -580,10 +615,6 @@ es fiable, y por eso el trigger tiene que ser por evento.
 Lo que sí diferencia a las corridas es dónde se paran: una que llegó tuvo
 12 tandas de shaders con un pico de **128 pipelines en t+155 s** (la
 ciudad), y una que no llegó se quedó en 6 tandas y se detuvo en t+57 s.
-Los 16 gestos terminan en t+62 s, pero la ciudad carga en t+155 s: **el
-input se acaba antes de que el juego esté listo**.
-`scripts/find_entry_script.py` busca el guion de entrada que aguanta
-hasta ese momento.
 
 ## El XEX
 
