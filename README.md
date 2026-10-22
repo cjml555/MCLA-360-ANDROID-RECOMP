@@ -43,6 +43,7 @@ que usa el port de *Need for Speed: Carbon* de este repositorio.
 | `scripts/huecos.py` | Localiza los huecos midiendo el C++ generado (viene del SDK). |
 | `scripts/test_pad_press.sh` | Prueba la pulsación en el PC y reporta los errores fatales. |
 | `scripts/hunt_gaps_with_press.sh` | Cazando los huecos que solo se alcanzan al pulsar. |
+| `scripts/ab_test_press.sh` | A/B: ¿las pulsaciones hacen avanzar el juego? |
 | `generated/rexglue.cmake` | Boilerplate del SDK (versionado). El resto de `generated/` se regenera y no se versiona. |
 
 ## El problema que resuelve este PoC
@@ -385,6 +386,11 @@ un archivo que sin pulsaciones no lee nunca** (A/B: 0 lecturas en el
 control, 0.3 MB con pulsaciones). Cada pantalla nueva es código nuevo, y el
 código nuevo puede tener huecos.
 
+Aviso: esa comparación de `xarchive_audlo.rpf` se hizo con el A/B
+defectuoso del que se habla en la sección 7, así que **no es una prueba
+válida**. La medida buena es la de la sección 7, con el control que
+instala el pad pero no pulsa.
+
 El ciclo también se corrigió por el camino, en dos cosas que lo hacían
 perder crashes:
 
@@ -421,22 +427,46 @@ Por eso se mantiene **6 consultas** en vez de una.
 
 ### 7. Lo que de verdad advance el juego
 
-El A/B limpio (borrando `user` y `cache` antes de cada corrida) dice que
-las pulsaciones no son un detalle, son la diferencia entre quedarse en el
-menú y entrar en la partida:
+Para medirlo hace falta un **control decente**, y el primero no lo era. El
+código hace `if (presses.empty()) return;`, así que sin guion **el pad ni
+siquiera se instala** y el guest del control no ve ningún dispositivo de
+juego. Ese control comparaba dos cosas a la vez: que hubiera un pad
+conectado y que se pulsara algo.
 
-| Corrida | pipelines | guardado |
-|---|---|---|
-| control (sin pulsar) | 299 | no |
-| 16 pulsaciones | **718** | no |
-| control otra vez | 265 | no |
-| 16 pulsaciones otra vez | **589** | **sí** |
-| stick 4 direcciones + A + START | 385 | no |
+El control justo es un guion que instala el pad pero que nunca dispara: un
+gesto programado más allá del final de la corrida (`9999:0x1000`). El guest
+ve el mismo dispositivo, pero ningún botón baja. Con `user` y `cache`
+limpios antes de cada corrida:
 
-El `mc4.sav` que aparece es la señal de que el juego entró en una partida de
-verdad, no en un menú. El stick por sí solo rinde menos que los botones
-(385 pipelines frente a 589-718): el juego responde mejor a la secuencia
-de botones que a las cuatro direcciones del stick.
+| Corrida | pipelines | gestos | guardado |
+|---|---|---|---|
+| A: sin pad en absoluto | 556 | 0 | no |
+| B: pad presente, no pulsa | 554 | 0 | no |
+| C: 16 pulsaciones | 643 | 16 | no |
+| D: pad presente, no pulsa | 564 | 0 | no |
+| E: 16 pulsaciones | 693 | 16 | no |
+| F: stick 4 dir + A + START | 643 | 14 | no |
+
+Lo que dice esto:
+
+- **Tener el pad no cambia nada** (A 556 contra B 554). El avance lo
+  causan las pulsaciones, no la presencia del dispositivo.
+- **Las pulsaciones sí cambian** (554-564 contra 643-693): del orden de
+  100 pipelines más, un 18 %. Es la diferencia entre quedarse en el menú
+  y entrar en la partida.
+- **El stick rinde igual que los botones** (643 contra 643-693). La
+  conclusión anterior de que el stick rendía menos venía del control
+  defectuoso, no del stick.
+
+Un `mc4.sav` que aparece es la señal fuerte de que el juego entró en una
+partida de verdad, no en un menú. Es intermitente —depende de hasta dónde
+llega el juego antes de que acabe la corrida—, así que la medida de
+referencia es el conteo de pipelines y el guardado es la confirmación.
+
+Ojo con el conteo absoluto: **es ruidoso**. La misma corrida de control
+dio 299, 265 y 556 pipelines en corridas distintas. La diferencia entre
+condiciones es sólida, el valor absoluto no sirve para comparar contra
+números guardados de otra sesión.
 
 #### La trampa del A/B: el juego necesita un X server
 
