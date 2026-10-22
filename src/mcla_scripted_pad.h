@@ -86,6 +86,15 @@ using rex::X_STATUS;
 // six-poll hold is barely more than a second, which is enough to move a
 // menu cursor and far too little to steer a car. Zero means the default
 // (a handful of polls).
+//
+// wait_for_file is a different kind of trigger: the gesture does not
+// fire at a moment in time, it fires when a given file appears. The
+// script of times is a stopwatch, and the game does not keep the
+// stopwatch's pace: the moment it reaches the intro cinematic moves
+// between runs (measured: t+86s to t+101s), so a gesture scheduled for
+// a fixed second lands inside the cinematic sometimes and after it
+// other times, and a cinematic ignores the input. A file trigger does
+// not care when the game gets there.
 struct Press {
   double at_seconds = 0.0;
   uint16_t buttons = 0;
@@ -94,8 +103,15 @@ struct Press {
   float rx = 0.0f;
   float ry = 0.0f;
   double hold_seconds = 0.0;
+  // When set, the gesture waits for this file to exist instead of
+  // waiting for the clock. The path is absolute.
+  std::string wait_for_file;
+  // How long to keep waiting for that file before giving up. Zero means
+  // forever.
+  double wait_timeout_seconds = 0.0;
 
   bool IsStick() const { return lx != 0.0f || ly != 0.0f || rx != 0.0f || ry != 0.0f; }
+  bool IsFileTriggered() const { return !wait_for_file.empty(); }
 };
 
 // Reads the press script from the MCLA_PAD_PRESS environment variable.
@@ -152,6 +168,10 @@ class ScriptedGamepadDriver final : public rex::input::InputDriver {
     PressState state = PressState::kPending;
     uint16_t buttons = 0;  // the buttons this gesture holds down
     int polls_left = 0;    // for a stick: polls still to hold it
+    // For a file trigger: when the wait started, so the timeout can be
+    // measured from there.
+    bool wait_started_ = false;
+    double wait_start_seconds = 0.0;
   };
 
   std::vector<Scheduled> schedule_;

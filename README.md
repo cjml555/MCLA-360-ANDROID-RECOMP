@@ -495,6 +495,48 @@ La solución es el driver de video `offscreen` de SDL, que no necesita X:
 Con eso el juego corre en un `terminal` sin `DISPLAY`, y el A/B es
 fiable. `scripts/test_pad_press.sh` ya lo usa.
 
+### 8. Conducir: el stick tiene que ir DESPUÉS de la intro
+
+Un detalle que cuesta un rodeo entero. El juego mete una cinemática
+(`intro720.bik`) entre los menús y la ciudad, y **durante la cinemática el
+input no hace nada**: un vídeo no mira el pad.
+
+El juego **sí consulta el pad de forma continua** durante todo el rato
+(hasta el poll #1550 a t+239 s), así que el input llega; lo que no llega
+es la oportunidad de usarlo. Un stick colocado a t+55 llega al juego,
+pero el juego está viendo la intro, así que no pasa nada.
+
+**El problema de fondo: el momento en que el juego llega a la intro varía
+entre corridas.** El script de tiempos es un reloj, no un disparador por
+evento: un `165:s:1:0@10` significa "en el segundo 165", y si ese segundo
+cae dentro de la intro, el stick se pierde. Por eso un guion con el
+stick en un tiempo fijo no es fiable:
+
+| Corrida | pipelines | intro | exit |
+|---|---|---|---|
+| J: entrada, sin stick | 804 | 14 | 124 (completa) |
+| J: entrada, sin stick | 930 | 15 | 124 (completa) |
+| K: entrada + stick a t+165 | 640 | **0** | 124 (completa) |
+| K: entrada + stick a t+165 | 658 | **0** | 124 (completa) |
+
+El stick a t+165 **empeora** el resultado (640-658 contra 804-930) y
+además impide que se reproduzca la intro (`bik=0`): el tiempo fijo
+empuja al juego a un momento en que el input no sirve para nada.
+
+Ojo con el OOM killer: el juego carga `.rpf` de más de un gigabyte y en
+una máquina apretada lo matan. Una corrida muerta da un conteo sin
+sentido, así que hay que mirar el código de salida (`124` = llegó al
+final, `137` = OOM). Una medición hecha con un control asesinado por el
+OOM dio "922 contra 650" y parecía un gran resultado: era una corrida
+incompleta comparada contra otra completa.
+
+La solución no es un tiempo mejor elegido, es un **disparador por
+evento**: que el stick empiece cuando el juego haya llegado a la intro,
+no cuando el reloj diga un número. Los pipelines post-intro son de otro
+tipo (vertex shaders `NEDEBENENE`, `NDNBN`, distintos de los de los
+menús): es el código de la ciudad, que solo se compila si el juego llega
+a la ciudad, y es la señal de que el gameplay se está ejecutando.
+
 ## El XEX
 
 El launcher **rechaza** cualquier otro `default.xex`: el código recompilado y

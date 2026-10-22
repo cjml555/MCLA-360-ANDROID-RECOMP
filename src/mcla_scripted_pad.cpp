@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 
 #include <rex/input/input_system.h>
@@ -42,6 +43,66 @@ bool ParsePress(const std::string& text, Press* out) {
     }
   } catch (...) {
     return false;
+  }
+
+  // A file trigger: "w:<path>[:<timeout>][:<action>]". The gesture waits
+  // for the file to exist instead of waiting for the clock. The action
+  // is optional and defaults to a button A, because the common case is
+  // "when the game gets to this point, press this".
+  if (rest.rfind("w:", 0) == 0) {
+    std::string body = rest.substr(2);
+    // The action is the last colon-separated field, if it looks like
+    // one. It has to say what it is: "s:" for a stick, "0x" for a button
+    // mask. A bare number is the timeout, not a mask, because a mask
+    // without the "0x" is indistinguishable from one.
+    std::string path = body;
+    std::string action;
+    const size_t last_colon = body.rfind(':');
+    if (last_colon != std::string::npos && last_colon > 0) {
+      const std::string tail = body.substr(last_colon + 1);
+      const bool looks_like_action = tail.rfind("s:", 0) == 0 || tail.rfind("0x", 0) == 0;
+      if (looks_like_action) {
+        path = body.substr(0, last_colon);
+        action = tail;
+      }
+    }
+    double timeout = 0.0;
+    // The timeout sits between the path and the action: "w:<path>:<t>".
+    const size_t timeout_colon = path.rfind(':');
+    if (timeout_colon != std::string::npos && timeout_colon > 0) {
+      const std::string timeout_text = path.substr(timeout_colon + 1);
+      try {
+        size_t consumed = 0;
+        const double value = std::stod(timeout_text, &consumed);
+        if (consumed == timeout_text.size() && value >= 0.0) {
+          timeout = value;
+          path = path.substr(0, timeout_colon);
+        }
+      } catch (...) {
+        // Not a number: the colon belongs to the path. Keep it.
+      }
+    }
+    if (path.empty()) {
+      return false;
+    }
+    out->at_seconds = at;
+    out->wait_for_file = path;
+    out->wait_timeout_seconds = timeout;
+    if (!action.empty()) {
+      Press accion;
+      if (!ParsePress("0:" + action, &accion)) {
+        return false;
+      }
+      out->buttons = accion.buttons;
+      out->lx = accion.lx;
+      out->ly = accion.ly;
+      out->rx = accion.rx;
+      out->ry = accion.ry;
+      out->hold_seconds = accion.hold_seconds;
+    } else {
+      out->buttons = 0x1000;  // A
+    }
+    return true;
   }
 
   // A stick entry: "s:<lx>:<ly>" or "s:<lx>:<ly>:<rx>:<ry>", optionally
@@ -229,6 +290,36 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
   for (Scheduled& scheduled : schedule_) {
     switch (scheduled.state) {
       case PressState::kPending:
+        if (scheduled.press.IsFileTriggered()) {
+          // A file trigger does not care about the clock: it waits for
+          // the file to show up. The file is what a harness touches when
+          // it sees the game reach a known point, so the gesture fires
+          // exactly then, whatever the pace of the run.
+          if (!scheduled.wait_started_) {
+            scheduled.wait_started_ = true;
+            scheduled.wait_start_seconds = elapsed;
+          }
+          const bool timed_out =
+              scheduled.press.wait_timeout_seconds > 0.0 &&
+              elapsed - scheduled.wait_start_seconds > scheduled.press.wait_timeout_seconds;
+          if (std::filesystem::exists(scheduled.press.wait_for_file)) {
+            scheduled.state = PressState::kDown;
+            scheduled.buttons = scheduled.press.buttons;
+            scheduled.polls_left = scheduled.press.IsStick() ? kStickPolls : 1;
+            buttons |= scheduled.buttons;
+            lx = to_axis(scheduled.press.lx);
+            ly = to_axis(scheduled.press.ly);
+            rx = to_axis(scheduled.press.rx);
+            ry = to_axis(scheduled.press.ry);
+            REXLOG_INFO("mcla: scripted gamepad trigger fired: {} at t={:.2f}s",
+                        scheduled.press.wait_for_file, elapsed);
+          } else if (timed_out) {
+            REXLOG_INFO("mcla: scripted gamepad trigger timed out: {} at t={:.2f}s",
+                        scheduled.press.wait_for_file, elapsed);
+            scheduled.state = PressState::kDone;
+          }
+          break;
+        }
         if (elapsed >= scheduled.press.at_seconds) {
           scheduled.state = PressState::kDown;
           scheduled.buttons = scheduled.press.buttons;
