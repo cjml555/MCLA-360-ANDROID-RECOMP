@@ -27,31 +27,12 @@ constexpr rex::input::DeviceId kScriptedDevice = static_cast<rex::input::DeviceI
 // prefix; the axes are fractions from -1 to 1. Returns false on anything
 // malformed.
 bool ParsePress(const std::string& text, Press* out) {
-  const size_t colon = text.find(':');
-  if (colon == std::string::npos || colon == 0 || colon + 1 >= text.size()) {
-    return false;
-  }
-  const std::string seconds = text.substr(0, colon);
-  const std::string rest = text.substr(colon + 1);
-
-  double at = 0.0;
-  try {
-    size_t consumed = 0;
-    at = std::stod(seconds, &consumed);
-    if (consumed != seconds.size()) {
-      return false;
-    }
-  } catch (...) {
-    return false;
-  }
-
-  // A file trigger: "w:<path>|<timeout>|<action>". The parts are
-  // separated by '|' and not by ':' because both the path and the
-  // action contain colons: the path is a file name and the action can
-  // be a stick ("s:1:0:0:0"). With colons there is no way to tell
-  // where one ends and the next begins.
-  if (rest.rfind("w:", 0) == 0) {
-    const std::string body = rest.substr(2);
+  // A file trigger starts with "w:" and has NO leading time: the whole
+  // entry is the trigger. It has to be checked BEFORE splitting on the
+  // first colon, because that colon is the "w:" itself: "w:/tmp/paso0"
+  // would otherwise be read as the time "w" and the rest "/tmp/paso0".
+  if (text.rfind("w:", 0) == 0) {
+    const std::string body = text.substr(2);
     std::vector<std::string> parts;
     size_t begin = 0;
     while (begin <= body.size()) {
@@ -65,7 +46,7 @@ bool ParsePress(const std::string& text, Press* out) {
     if (parts.empty() || parts[0].empty()) {
       return false;
     }
-    out->at_seconds = at;
+    out->at_seconds = 0.0;
     out->wait_for_file = parts[0];
     if (parts.size() > 1 && !parts[1].empty()) {
       try {
@@ -96,6 +77,24 @@ bool ParsePress(const std::string& text, Press* out) {
       out->buttons = 0x1000;  // A
     }
     return true;
+  }
+
+  const size_t colon = text.find(':');
+  if (colon == std::string::npos || colon == 0 || colon + 1 >= text.size()) {
+    return false;
+  }
+  const std::string seconds = text.substr(0, colon);
+  const std::string rest = text.substr(colon + 1);
+
+  double at = 0.0;
+  try {
+    size_t consumed = 0;
+    at = std::stod(seconds, &consumed);
+    if (consumed != seconds.size()) {
+      return false;
+    }
+  } catch (...) {
+    return false;
   }
 
   // A stick entry: "s:<lx>:<ly>" or "s:<lx>:<ly>:<rx>:<ry>", optionally

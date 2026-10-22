@@ -33,19 +33,30 @@ TRIGGER_DIR = Path(os.environ.get("MCLA_TRIGGER_DIR", "/tmp/mcla-triggers"))
 
 # La entrada por los menus, que llega al free roam.
 #
-# La mezcla importa mas que la cantidad. Con 16 gestos (A, START y D-pad
-# en rotacion) el juego llega y crea el guardado; con 32 gestos de A
-# PURO no llega nunca (medido: 6 corridas con A puro, 0 con guardado;
-# 2 de 5 con la mezcla, con guardado). Pulsar A sin mas es pasarse de
-# opcion: el D-pad y el START son los que mueven los menus.
+# Son EXACTAMENTE 16 gestos, con esta mezcla, y nada mas:
 #
-# Y la entrada tiene que durar: la ciudad carga en t+155s y una entrada
-# que acaba en t+62s se queda corta. Por eso el patron de 16 se repite
-# hasta t+140, cubriendo la carga.
+#   16 gestos (A, START y D-pad en rotacion)   llega, 2 de 5 corridas
+#   16 + cola de mantenimiento de 12            no llega, 0 de 2
+#   32 gestos de A PURO                         no llega nunca, 0 de 6
+#   48 gestos de la mezcla repetida              no llega, 0 de 2
+#
+# Dos cosas se han medido:
+#
+#   - La mezcla importa mas que la cantidad. Pulsar A sin mas es
+#     pasarse de opcion: el D-pad y el START son los que mueven los
+#     menus.
+#   - Anadir mas gestos despues tambien rompe. El guardado se escribe
+#     en t+60s, justo cuando el ultimo gesto de los 16 hace su efecto
+#     (t+48s). Anyadir una cola de mantenimiento despues deja al
+#     juego en un estado donde el menu ya no avanza.
+#
+# El guardado se crea al entrar en la partida, y ahi es donde el
+# trigger engancha: los sticks salen 95s despues, cuando la ciudad ya
+# ha cargado (t+155s).
 PATRON = ["0x1000", "0x1000", "0x0010", "0x1000", "0x0008",
           "0x1000", "0x0010", "0x1000", "0x0001", "0x1000",
           "0x0010", "0x1000", "0x0008", "0x1000", "0x0010", "0x1000"]
-ENTRADA = ",".join(f"{3+i*3}:{PATRON[i % len(PATRON)]}" for i in range(48))
+ENTRADA = ",".join(f"{3+i*3}:{PATRON[i]}" for i in range(len(PATRON)))
 
 
 def log_parts(log_path: Path, launched_at: float = 0.0):
@@ -186,7 +197,6 @@ def main():
         ([ENTRADA] if not args.sin_entrada else []) +
         [f"w:{f}|600|{a}" for _, f, a in senales]
     )
-
     env = dict(os.environ)
     env["MCLA_PAD_PRESS"] = guion
 
