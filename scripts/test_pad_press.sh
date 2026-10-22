@@ -46,12 +46,17 @@ mkdir -p "$LOG_DIR"
 BEFORE="$(ls -1 "$LOG_DIR" 2>/dev/null | wc -l)"
 
 echo "==> pulsaciones: $SCRIPT  (durante ${DURATION}s)"
+# --video_driver offscreen: el driver de video de SDL que no necesita un
+# X server. Sin el, la corrida muere en 0.03 s con "No available video
+# device" si no hay DISPLAY, y el fallo es silencioso: no hay log, y un
+# A/B con ese fallo da numeros identicos siempre.
 MCLA_PAD_PRESS="$SCRIPT" timeout "$DURATION" "$ROOT/out/pc/mcla" \
   --game_data_root="$GAME_ROOT" \
   --user_data_root="$ROOT/out/runtime/user" \
   --cache_root="$ROOT/out/runtime/cache" \
   --metadata_root="$ROOT/out/runtime/metadata" \
   --log_level=info --headless=true --mnk_mode=true --user_language=1 \
+  --video_driver offscreen \
   > /dev/null 2>&1 || true
 
 # El log nuevo es el mas reciente; tambien puede tener una parte rotada.
@@ -63,7 +68,7 @@ fi
 
 echo
 echo "==> log: $LOG"
-grep -E "scripted gamepad (clock|pressing|installed)" "$LOG" 2>/dev/null \
+grep -E "scripted gamepad (clock|buttons|pressing|installed|poll)" "$LOG" 2>/dev/null \
   | sed 's/.*mcla: /  /' || echo "  (el pad no se instalo: revisa MCLA_PAD_PRESS)"
 
 PIPES="$(grep -c 'Creating graphics pipeline' "$LOG" 2>/dev/null | head -1 || true)"
@@ -76,6 +81,22 @@ FATALS="${FATALS:-0}"
 echo
 echo "  pipelines creados: $PIPES"
 echo "  errores fatales:   $FATALS"
+
+# Un guardado mc4.sav significa que el juego entro en una partida de
+# verdad: llego al free roam, no a un menu. Es la senal de avance
+# fuerte, mucho mas que el numero de pipelines.
+if find "$ROOT/out/runtime/user" -name '*.sav' 2>/dev/null | grep -q .; then
+  echo "  partida guardada:  SI (llego al free roam)"
+else
+  echo "  partida guardada:  no (sigue en los menus)"
+fi
+
+# Las partes rotadas del log tambien cuentan: el sink renombra el
+# actual a .1.log al llegar a 5 MB, y su contenido es ANTERIOR.
+ROTATED="$(ls -t "$LOG_DIR"/*.1.log 2>/dev/null | head -1)"
+if [ -n "$ROTATED" ]; then
+  echo "  log rotado:       $(basename "$ROTATED")"
+fi
 
 if [ "$FATALS" -gt 0 ]; then
   echo

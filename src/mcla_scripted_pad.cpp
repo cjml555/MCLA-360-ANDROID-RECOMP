@@ -21,15 +21,17 @@ namespace {
 // (the keyboard one uses 0x4D4E4B00), so this cannot collide.
 constexpr rex::input::DeviceId kScriptedDevice = static_cast<rex::input::DeviceId>(0x53435250);
 
-// Parses one "<seconds>:<mask>" entry. The mask is hexadecimal, with or
-// without the 0x prefix. Returns false on anything malformed.
+// Parses one "<seconds>:<mask>" entry, or "<seconds>:s:<lx>:<ly>[:<rx>:<ry>]"
+// for a stick deflection. The mask is hexadecimal, with or without the 0x
+// prefix; the axes are fractions from -1 to 1. Returns false on anything
+// malformed.
 bool ParsePress(const std::string& text, Press* out) {
   const size_t colon = text.find(':');
   if (colon == std::string::npos || colon == 0 || colon + 1 >= text.size()) {
     return false;
   }
   const std::string seconds = text.substr(0, colon);
-  const std::string mask = text.substr(colon + 1);
+  const std::string rest = text.substr(colon + 1);
 
   double at = 0.0;
   try {
@@ -42,11 +44,48 @@ bool ParsePress(const std::string& text, Press* out) {
     return false;
   }
 
+  // A stick entry: "s:<lx>:<ly>" or "s:<lx>:<ly>:<rx>:<ry>".
+  if (rest.rfind("s:", 0) == 0) {
+    const std::string axes = rest.substr(2);
+    std::vector<std::string> parts;
+    size_t begin = 0;
+    while (begin <= axes.size()) {
+      const size_t sep = axes.find(':', begin);
+      parts.push_back(axes.substr(begin, sep == std::string::npos ? std::string::npos : sep - begin));
+      if (sep == std::string::npos) {
+        break;
+      }
+      begin = sep + 1;
+    }
+    if (parts.size() != 2 && parts.size() != 4) {
+      return false;
+    }
+    float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (size_t i = 0; i < parts.size(); i++) {
+      try {
+        size_t consumed = 0;
+        const double value = std::stod(parts[i], &consumed);
+        if (consumed != parts[i].size() || value < -1.0 || value > 1.0) {
+          return false;
+        }
+        values[i] = static_cast<float>(value);
+      } catch (...) {
+        return false;
+      }
+    }
+    out->at_seconds = at;
+    out->lx = values[0];
+    out->ly = values[1];
+    out->rx = values[2];
+    out->ry = values[3];
+    return true;
+  }
+
   uint16_t buttons = 0;
   try {
     size_t consumed = 0;
-    const unsigned long value = std::stoul(mask, &consumed, 0);
-    if (consumed != mask.size() || value > 0xFFFF) {
+    const unsigned long value = std::stoul(rest, &consumed, 0);
+    if (consumed != rest.size() || value > 0xFFFF) {
       return false;
     }
     buttons = static_cast<uint16_t>(value);
@@ -130,27 +169,66 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
     REXLOG_INFO("mcla: scripted gamepad clock starts");
   }
 
+  // How many times the guest has looked at the pad. The guest only asks
+  // while it is running its menus, and it stops asking while it compiles
+  // shaders, so the poll count is what says whether a gesture had a
+  // chance of being seen.
+  {
+    static uint32_t polls = 0;
+    if (++polls % 50 == 0) {
+      REXLOG_INFO("mcla: scripted gamepad poll #{}", polls);
+    }
+  }
+
   const double elapsed =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
 
-  // Each press advances by ONE poll, not by the clock: the guest has to
+  // Each gesture advances by ONE poll, not by the clock: the guest has to
   // see the button go down and then go up again, and the only thing that
-  // can guarantee that is a poll. A press that is due stays down until the
-  // next poll releases it, so a slow polling rate delays the release but
-  // never loses the press.
+  // can guarantee that is a poll. A gesture that is due stays down until
+  // the next poll releases it, so a slow polling rate delays the release
+  // but never loses the gesture.
+  //
+  // A stick is held for kStickPolls polls instead of one: it is a
+  // position, not an edge, and the guest may need to see it over several
+  // frames to move a cursor.
   uint16_t buttons = 0;
+  int16_t lx = 0;
+  int16_t ly = 0;
+  int16_t rx = 0;
+  int16_t ry = 0;
+
+  // The XInput axes are 16-bit signed, full deflection at INT16_MAX.
+  const auto to_axis = [](float fraction) {
+    return static_cast<int16_t>(fraction * INT16_MAX);
+  };
+
   for (Scheduled& scheduled : schedule_) {
     switch (scheduled.state) {
       case PressState::kPending:
         if (elapsed >= scheduled.press.at_seconds) {
           scheduled.state = PressState::kDown;
           scheduled.buttons = scheduled.press.buttons;
+          scheduled.polls_left = scheduled.press.IsStick() ? kStickPolls : 1;
           buttons |= scheduled.buttons;
+          lx = to_axis(scheduled.press.lx);
+          ly = to_axis(scheduled.press.ly);
+          rx = to_axis(scheduled.press.rx);
+          ry = to_axis(scheduled.press.ry);
         }
         break;
       case PressState::kDown:
-        // The guest has seen it down on the previous poll: release it now.
-        scheduled.state = PressState::kUp;
+        if (--scheduled.polls_left > 0) {
+          // Still holding the stick: keep the deflection.
+          buttons |= scheduled.buttons;
+          lx = to_axis(scheduled.press.lx);
+          ly = to_axis(scheduled.press.ly);
+          rx = to_axis(scheduled.press.rx);
+          ry = to_axis(scheduled.press.ry);
+        } else {
+          // The guest has seen it: release it.
+          scheduled.state = PressState::kUp;
+        }
         break;
       case PressState::kUp:
         // The release was reported on the previous poll: done.
@@ -161,11 +239,17 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
     }
   }
 
-  if (buttons != last_buttons_) {
+  if (buttons != last_buttons_ || lx != last_lx_ || ly != last_ly_ || rx != last_rx_ ||
+      ry != last_ry_) {
     last_buttons_ = buttons;
+    last_lx_ = lx;
+    last_ly_ = ly;
+    last_rx_ = rx;
+    last_ry_ = ry;
     packet_number_++;
-    if (buttons != 0) {
-      REXLOG_INFO("mcla: scripted gamepad pressing 0x{:04X} at t={:.2f}s", buttons, elapsed);
+    if (buttons != 0 || lx != 0 || ly != 0 || rx != 0 || ry != 0) {
+      REXLOG_INFO("mcla: scripted gamepad buttons=0x{:04X} stick=({},{},{},{}) at t={:.2f}s",
+                  buttons, lx, ly, rx, ry, elapsed);
     }
   }
 
@@ -174,10 +258,10 @@ X_RESULT ScriptedGamepadDriver::GetDeviceState(rex::input::DeviceId id,
     out_state->gamepad.buttons = buttons;
     out_state->gamepad.left_trigger = 0;
     out_state->gamepad.right_trigger = 0;
-    out_state->gamepad.thumb_lx = 0;
-    out_state->gamepad.thumb_ly = 0;
-    out_state->gamepad.thumb_rx = 0;
-    out_state->gamepad.thumb_ry = 0;
+    out_state->gamepad.thumb_lx = lx;
+    out_state->gamepad.thumb_ly = ly;
+    out_state->gamepad.thumb_rx = rx;
+    out_state->gamepad.thumb_ry = ry;
   }
   return X_ERROR_SUCCESS;
 }

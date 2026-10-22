@@ -182,7 +182,12 @@ def launch(press_script=None, timeout=90):
            f"--cache_root={ROOT}/out/runtime/cache",
            f"--metadata_root={ROOT}/out/runtime/metadata",
            "--log_level=info", "--headless=true", "--mnk_mode=true",
-           "--user_language=1", "--async_shader_compilation=false"]
+           "--user_language=1", "--async_shader_compilation=false",
+           # El driver de video offscreen de SDL no necesita un X server.
+           # Sin el, y sin DISPLAY en el entorno, el juego muere en 0.03 s
+           # con "No available video device" y no deja log: el fallo es
+           # silencioso y el hunting no ve nada.
+           "--video_driver=offscreen"]
     env = dict(os.environ)
     if press_script:
         env["MCLA_PAD_PRESS"] = press_script

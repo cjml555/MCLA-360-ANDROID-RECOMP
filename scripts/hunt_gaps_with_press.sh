@@ -52,10 +52,18 @@ done
 echo "==> resumen de lo que se ha leido con pulsaciones"
 # Los archivos que el juego solo lee si avanza: la senal de que ha
 # llegado a contenido nuevo.
-LAST="$(ls -t out/pc/logs/mcla_*.log 2>/dev/null | head -1)"
+LAST="$(ls -t out/pc/logs/mcla_*.log 2>/dev/null | grep -v '\.[0-9]*\.log$' | head -1)"
 if [ -n "$LAST" ]; then
   for f in xarchive_audlo.rpf xarchive_audio.rpf xarchive_music.rpf xarchive_cache.rpf; do
     n="$(grep -c "$f" "$LAST" 2>/dev/null || true)"
     printf '    %-24s %s\n' "$f" "${n:-0}"
   done
+fi
+
+# Un mc4.sav significa que el juego entro en una partida de verdad, no
+# en un menu. Es la senal de avance fuerte.
+if find out/runtime/user -name '*.sav' 2>/dev/null | grep -q .; then
+  echo "    partida guardada:    SI (llego al free roam)"
+else
+  echo "    partida guardada:    no (sigue en los menus)"
 fi

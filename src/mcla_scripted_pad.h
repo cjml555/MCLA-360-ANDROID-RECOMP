@@ -31,14 +31,20 @@
 // A = 0x1000, B = 0x2000, X = 0x4000, Y = 0x8000, START = 0x0010,
 // BACK = 0x0020, D-pad = 0x0001..0x0008.
 //
+// An entry can also move a stick, with the "s:" prefix and the axes as
+// "<lx>:<ly>" (left) or "<lx>:<ly>:<rx>:<ry>" (both), each from -1 to 1:
+//
+//   MCLA_PAD_PRESS="3:s:0:-1,6:0x1000"        # stick abajo, luego A
+//   MCLA_PAD_PRESS="3:s:0:-1:0:0"              # stick abajo
+//
+// The stick signs are the XInput ones: x positive is right, y positive is
+// up. The SDK's deadzone is 7849, so a fraction above 0.25 is enough to
+// count as a deflection.
+//
 // The times are relative to the first poll, not to the start of the run:
 // the guest does not look at the pad until it reaches the title screen,
 // which is half a minute in. So "2:0x1000" means "press A two seconds
 // after the game first asks for the pad".
-//
-// The button is held for a fifth of a second: long enough for the guest to
-// poll it (it polls several times per frame) and short enough to look like
-// a tap.
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -59,10 +65,20 @@ namespace mcla {
 using rex::X_RESULT;
 using rex::X_STATUS;
 
-// One entry of the press script: when to press, and which buttons.
+// One entry of the press script: when to act, and what to do.
+//
+// A gesture is either buttons (the XInput mask), a stick deflection, or
+// both. The axes are the XInput ones: x positive is right, y positive is
+// up, each from -1 to 1.
 struct Press {
   double at_seconds = 0.0;
   uint16_t buttons = 0;
+  float lx = 0.0f;
+  float ly = 0.0f;
+  float rx = 0.0f;
+  float ry = 0.0f;
+
+  bool IsStick() const { return lx != 0.0f || ly != 0.0f || rx != 0.0f || ry != 0.0f; }
 };
 
 // Reads the press script from the MCLA_PAD_PRESS environment variable.
@@ -95,15 +111,21 @@ class ScriptedGamepadDriver final : public rex::input::InputDriver {
                                rex::input::X_INPUT_KEYSTROKE* out_keystroke) override;
 
  private:
-  // The state of one scheduled press.
+  // The state of one scheduled gesture.
   //
-  // A press is not a window of time: it is a sequence of polls. The guest
-  // sees the button go down, then up, and that pair is what it acts on. So
-  // the press waits for the polls to happen instead of hoping the guest
-  // happens to look at the pad during a fixed window.
+  // A gesture is not a window of time: it is a sequence of polls. The
+  // guest has to see the button go down and then go up again, and the
+  // only thing that can guarantee that is a poll. A gesture that is due
+  // stays down until the next poll releases it, so a slow polling rate
+  // delays the release but never loses the gesture.
+  //
+  // A stick deflection is different: it is not an edge but a position,
+  // and the guest may need to see it over several frames to move a
+  // cursor. It is therefore held for a number of polls (stick_polls_),
+  // not just one.
   enum class PressState {
     kPending,   // not due yet
-    kDown,      // due: the button goes down and stays down
+    kDown,      // due: the buttons go down and the stick deflects
     kUp,        // the guest has seen it down: release it
     kDone,      // released and delivered
   };
@@ -111,18 +133,28 @@ class ScriptedGamepadDriver final : public rex::input::InputDriver {
   struct Scheduled {
     Press press;
     PressState state = PressState::kPending;
-    uint16_t buttons = 0;  // the buttons this press holds down
+    uint16_t buttons = 0;  // the buttons this gesture holds down
+    int polls_left = 0;    // for a stick: polls still to hold it
   };
 
   std::vector<Scheduled> schedule_;
   // The clock starts at the first poll, not at construction: the guest does
   // not ask for the pad until it reaches the title screen, which is half a
   // minute into the run. A clock that started at construction would fire
-  // every press long before anybody was listening.
+  // every gesture long before anybody was listening.
   std::chrono::steady_clock::time_point start_{};
   bool started_ = false;
   uint16_t last_buttons_ = 0;
+  int16_t last_lx_ = 0;
+  int16_t last_ly_ = 0;
+  int16_t last_rx_ = 0;
+  int16_t last_ry_ = 0;
   uint32_t packet_number_ = 0;
+
+  // How many polls a stick deflection is held for. The guest polls several
+  // times per frame, so a handful of polls is a fraction of a second of
+  // held stick, which is what a menu needs to move a cursor.
+  static constexpr int kStickPolls = 6;
 };
 
 // Installs the scripted gamepad into the SDK's input system. Does nothing

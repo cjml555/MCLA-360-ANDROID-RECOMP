@@ -401,6 +401,62 @@ perder crashes:
   la pulsación avanza de consulta en consulta —el botón baja, el guest lo
   ve, el botón sube— así que no se pierde nunca: las ocho se entregan.
 
+### 6. El stick analógico
+
+El guion también mueve los stick, con el prefijo `s:` y los ejes como
+`<lx>:<ly>` (izquierdo) o `<lx>:<ly>:<rx>:<ry>` (ambos), cada uno de -1 a 1:
+
+```bash
+MCLA_PAD_PRESS="3:s:0:-1,6:0x1000"      # stick abajo, luego A
+MCLA_PAD_PRESS="3:s:0:-1:0:0"            # stick abajo
+```
+
+Los signos son los de XInput: x positivo es derecha, y positivo es arriba.
+El deadzone del SDK es 7849, así que una fracción por encima de 0.25 ya
+cuenta como deflection.
+
+A diferencia del botón, el stick no es un flanco sino una posición, y el
+guest puede necesitar verlo durante varios frames para mover un cursor.
+Por eso se mantiene **6 consultas** en vez de una.
+
+### 7. Lo que de verdad advance el juego
+
+El A/B limpio (borrando `user` y `cache` antes de cada corrida) dice que
+las pulsaciones no son un detalle, son la diferencia entre quedarse en el
+menú y entrar en la partida:
+
+| Corrida | pipelines | guardado |
+|---|---|---|
+| control (sin pulsar) | 299 | no |
+| 16 pulsaciones | **718** | no |
+| control otra vez | 265 | no |
+| 16 pulsaciones otra vez | **589** | **sí** |
+| stick 4 direcciones + A + START | 385 | no |
+
+El `mc4.sav` que aparece es la señal de que el juego entró en una partida de
+verdad, no en un menú. El stick por sí solo rinde menos que los botones
+(385 pipelines frente a 589-718): el juego responde mejor a la secuencia
+de botones que a las cuatro direcciones del stick.
+
+#### La trampa del A/B: el juego necesita un X server
+
+Todo lo anterior costó un rodeo, y vale la pena escribirlo porque el
+fallo es **silencioso**. El juego abre una ventana de SDL y sin `DISPLAY`
+muere en 0.03 s con `No available video device`. No hay log, no hay crash,
+no hay nada: un A/B con ese fallo da **números idénticos siempre** y
+parece un resultado. Peor: la primera versión de este A/B comparaba el
+log equivocado, porque `mcla_*.log` también matchea `mcla_NNN.1.log`, que
+es la parte **rotada** y por tanto **anterior**.
+
+La solución es el driver de video `offscreen` de SDL, que no necesita X:
+
+```bash
+./out/pc/mcla ... --video_driver offscreen
+```
+
+Con eso el juego corre en un `terminal` sin `DISPLAY`, y el A/B es
+fiable. `scripts/test_pad_press.sh` ya lo usa.
+
 ## El XEX
 
 El launcher **rechaza** cualquier otro `default.xex`: el código recompilado y
