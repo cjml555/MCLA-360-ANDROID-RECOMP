@@ -33,9 +33,9 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path("/home/jhon/MCLA-360-ANDROID-RECOMP")
-SDK = Path("/home/jhon/nfsmw-android")
-GAME_ROOT = Path("/home/jhon/midnight-club-la")
+ROOT = Path(__file__).resolve().parent.parent
+SDK = Path(os.environ.get("REXSDK_DIR", Path.home() / "nfsmw-android"))
+GAME_ROOT = Path(os.environ.get("MCLA_GAME_ROOT", Path.home() / "midnight-club-la"))
 ANALYSIS = ROOT / "mcla_analysis.toml"
 MARKER = "# --- Auto: gaps sin dueno (huecos.py) ---"
 
